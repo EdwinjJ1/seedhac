@@ -44,3 +44,62 @@
 
 - 火山方舟 Coding 豪华套餐
 - 飞书 OpenAPI 无限调用额度
+
+---
+
+## 工程结构
+
+pnpm monorepo，三个 package：
+
+```
+packages/
+├── contracts/    # 跨包接口契约（Message/Card/BotRuntime/BitableClient/CardBuilder/LLMClient/Retriever/Skill）
+├── bot/          # 飞书 bot 进程入口（WSClient + Skill Router + 限流）
+└── skills/       # 7 条业务主线 Skill 实现（qa/recall/summary/slides/archive/crossChat/weekly）
+```
+
+> 改 `packages/contracts` 必须 PR + 三人 review（CLAUDE.md 硬约束）。
+
+## 跑起来（四步）
+
+```bash
+# 1. clone
+git clone git@github.com:EdwinjJ1/seedhac.git
+cd seedhac
+
+# 2. install
+pnpm install
+
+# 3. build
+pnpm build
+
+# 4. dev（启动 bot 进程，v0.1 仅打印加载到的 skill 清单）
+pnpm dev
+```
+
+辅助命令：
+
+```bash
+pnpm lint            # ESLint 全包
+pnpm typecheck       # 全包 tsc --noEmit
+pnpm format          # Prettier 全包格式化
+pnpm clean           # 清掉 dist / .tsbuildinfo
+```
+
+环境要求：Node ≥ 20、pnpm ≥ 8。
+
+## 文档地图
+
+读懂这个项目从这四份开始：
+
+1. [`README.md`](README.md) — 你正在看的这份
+2. [`docs/Q&A-产品方向.md`](docs/Q&A-产品方向.md) — 产品定位、红线（不能监听员工 1v1 私聊）
+3. [`docs/飞书权限与能力边界.md`](docs/飞书权限与能力边界.md) — 5 个 UI 入口、API 频控、合规边界
+4. [`docs/技术栈与可复用能力.md`](docs/技术栈与可复用能力.md) — 技术选型 + 架构图 + Skill Router
+
+会议纪要：[`docs/MEETING-NOTES.md`](docs/MEETING-NOTES.md)
+个人阶段成果（每 3 天一份）：[`docs/REPORTS/`](docs/REPORTS/)
+
+## 给 Claude Code
+
+仓库根目录的 [`CLAUDE.md`](CLAUDE.md) 写明了项目背景、技术约束、Git 协作规范、`lark-cli` 用法。新会话或 agent 都从这里读起。

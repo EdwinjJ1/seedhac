@@ -1,0 +1,25 @@
+{
+  "name": "@seedhac/skills",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SeedHAC 7 条业务主线 Skill 实现（v0.1 stub）",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "type": "module",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist .tsbuildinfo"
+  },
+  "dependencies": {
+    "@seedhac/contracts": "workspace:*"
+  }
+}
