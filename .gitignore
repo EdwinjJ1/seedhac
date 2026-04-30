@@ -4,6 +4,7 @@ __pycache__/
 *.pyc
 .env
 .env.local
+.env.*.local
 .venv/
 venv/
 dist/
@@ -11,3 +12,15 @@ build/
 .idea/
 .vscode/
 *.log
+
+# pnpm
+.pnpm-store/
+
+# TypeScript
+*.tsbuildinfo
+
+# Coverage
+coverage/
+
+# OS
+Thumbs.db
