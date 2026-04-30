@@ -16,6 +16,7 @@
     "lint:fix": "eslint \"packages/*/src/**/*.ts\" --fix",
     "format": "prettier --write \"packages/*/src/**/*.{ts,json,md}\"",
     "format:check": "prettier --check \"packages/*/src/**/*.{ts,json,md}\"",
+    "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck"
   },
   "devDependencies": {
