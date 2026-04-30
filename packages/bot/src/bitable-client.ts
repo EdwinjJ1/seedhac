@@ -34,6 +34,24 @@ const RETRY_DELAYS_MS = [1000, 2000, 4000] as const;
 const MAX_QPS = 10;
 const QPS_WINDOW_MS = 1000;
 
+/**
+ * SDK 的 fields 是带 union 的窄类型（多种字段值形态），随 SDK 版本会变。
+ * contracts 里 BitableRow = Record<string, unknown> 是宽类型。
+ *
+ * 边界转换集中在 toLarkFields 里：用 unknown 跳板把宽类型断言成 SDK 期望的窄类型，
+ * 类型擦除范围只限于这一处函数。下游调用点都用 toLarkFields 而不是散布 as any。
+ *
+ * SDK 的 create 是函数重载（v1+v2），不能用 Parameters<> 反射拿 fields 类型；
+ * 所以用 InferFields 借 SDK 的实参契约（不是反射，是结构契约）。
+ * 待 contracts 的 BitableRow 按 TableKind 收紧后，可以删掉这个工具。
+ */
+type CreateArg = Parameters<lark.Client['bitable']['appTableRecord']['create']>[0];
+type LarkFields = CreateArg extends { data: { fields: infer F } } ? F : never;
+
+function toLarkFields(row: BitableRow): LarkFields {
+  return row as unknown as LarkFields;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -45,7 +63,7 @@ async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
       return await fn();
     } catch (e) {
       lastErr = e;
-      if (attempt < 2) await sleep(RETRY_DELAYS_MS[attempt]);
+      if (attempt < 2) await sleep(RETRY_DELAYS_MS[attempt] ?? 1000);
     }
   }
   throw lastErr;
@@ -143,7 +161,7 @@ export class LarkBitableClient implements BitableClient {
       return ok({
         records,
         hasMore: res.data.has_more ?? false,
-        nextPageToken: res.data.page_token,
+        ...(res.data.page_token !== undefined && { nextPageToken: res.data.page_token }),
       });
     } catch (e) {
       return err(makeError(ErrorCode.FEISHU_API_ERROR, 'find failed', e));
@@ -156,7 +174,7 @@ export class LarkBitableClient implements BitableClient {
       const res = await this.call(() =>
         this.larkClient.bitable.appTableRecord.create({
           path: { app_token: this.config.appToken, table_id: tableId },
-          data: { fields: params.row as Record<string, unknown> },
+          data: { fields: toLarkFields(params.row) },
         }),
       );
 
@@ -184,7 +202,7 @@ export class LarkBitableClient implements BitableClient {
           this.larkClient.bitable.appTableRecord.batchCreate({
             path: { app_token: this.config.appToken, table_id: tableId },
             data: {
-              records: chunk.map((row) => ({ fields: row as Record<string, unknown> })),
+              records: chunk.map((row) => ({ fields: toLarkFields(row) })),
             },
           }),
         );
@@ -214,7 +232,7 @@ export class LarkBitableClient implements BitableClient {
             table_id: tableId,
             record_id: params.recordId,
           },
-          data: { fields: params.patch as Record<string, unknown> },
+          data: { fields: toLarkFields(params.patch) },
         }),
       );
       return ok(undefined);
@@ -252,9 +270,9 @@ export class LarkBitableClient implements BitableClient {
             record_id: params.fromRecordId,
           },
           data: {
-            fields: {
+            fields: toLarkFields({
               [params.fieldName]: params.toRecordIds.map((id) => ({ record_id: id })),
-            },
+            }),
           },
         }),
       );
