@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist .tsbuildinfo",
     "dev": "node --env-file=../../.env --import tsx/esm src/index.ts",
+    "dev:smoke": "node --env-file=../../.env --import tsx/esm src/scripts/smoke-cards.ts",
     "start": "node --env-file=../../.env dist/index.js",
     "test": "vitest run"
   },
