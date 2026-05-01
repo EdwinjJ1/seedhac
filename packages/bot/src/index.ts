@@ -12,6 +12,53 @@
 import * as lark from '@larksuiteoapi/node-sdk';
 import { skills } from '@seedhac/skills';
 
+// ─── 硬编码回复（临时好玩用，Skill Router 上线后删） ──────────────────────────
+
+const BARE_MENTION_REPLIES = [
+  '傻逼吧，@你爹我不说话',
+];
+
+const KEYWORD_REPLIES: Array<{ test: RegExp; replies: string[] }> = [
+  {
+    test: /你好|hi|hello|嗨/i,
+    replies: ['你好你好，有事吗', '哦', '嗯', "来了老6"],
+  },
+  {
+    test: /谢谢|感谢|thx|thanks/i,
+    replies: ['不客气，但你下次能不能别那么晚才谢', '嗯', '应该的，毕竟我是爸爸'],
+  },
+  {
+    test: /废物|没用|垃圾/i,
+    replies: ['你行你来', '…我记仇', '好的，已记录，复盘时翻出来', '好啊，等你来打我啊', '滚吧，傻逼'],
+  },
+  {
+    test: /nb|牛|厉害|强/i,
+    replies: ['那是', '我知道', '当然，废话'],
+  },
+];
+
+function pick<T>(arr: T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)]!;
+}
+
+/**
+ * 根据消息文本决定回复内容。
+ * 返回 null 表示不回复（正常业务消息交给 Skill Router 处理）。
+ */
+function hardcodedReply(text: string, isMentioned: boolean): string | null {
+  const cleaned = text.replace(/@\S+/g, '').trim();
+
+  // 光 @ 不说话
+  if (isMentioned && cleaned.length === 0) return pick(BARE_MENTION_REPLIES);
+
+  // 关键词命中
+  for (const { test, replies } of KEYWORD_REPLIES) {
+    if (test.test(cleaned)) return pick(replies);
+  }
+
+  return null;
+}
+
 interface LarkEnv {
   readonly appId: string;
   readonly appSecret: string;
@@ -71,6 +118,8 @@ async function main(): Promise<void> {
     loggerLevel: env.logLevel,
   });
 
+  const imClient = new lark.Client({ appId: env.appId, appSecret: env.appSecret });
+
   const dispatcher = new lark.EventDispatcher({
     verificationToken: env.verificationToken,
     encryptKey: env.encryptKey,
@@ -79,22 +128,38 @@ async function main(): Promise<void> {
     'im.message.receive_v1': async (data) => {
       const sender = data.sender?.sender_id?.open_id ?? '<unknown>';
       const chatId = data.message?.chat_id ?? '<unknown>';
+      const msgId = data.message?.message_id ?? '';
       const msgType = data.message?.message_type ?? '<unknown>';
       const rawContent = data.message?.content ?? '';
 
-      let preview = rawContent;
+      let text = '';
       if (msgType === 'text') {
         try {
           const parsed = JSON.parse(rawContent) as { text?: string };
-          preview = parsed.text ?? rawContent;
+          text = parsed.text ?? rawContent;
         } catch {
-          // SDK 偶尔会给已经反序列化的字符串，直接用
+          text = rawContent;
         }
       }
 
-      console.info(
-        `[seedhac/bot] 群消息 chat=${chatId} sender=${sender} type=${msgType} text=${preview}`,
-      );
+      const mentions = data.message?.mentions ?? [];
+      const isMentioned = mentions.length > 0;
+
+      console.info(`[seedhac/bot] 群消息 chat=${chatId} sender=${sender} mentioned=${isMentioned} text=${text}`);
+
+      // 硬编码回复（临时）
+      const reply = hardcodedReply(text, isMentioned);
+      if (reply) {
+        await imClient.im.message.reply({
+          path: { message_id: msgId },
+          data: {
+            msg_type: 'text',
+            content: JSON.stringify({ text: reply }),
+          },
+        });
+        console.info(`[seedhac/bot] 回复: ${reply}`);
+      }
+
       return { code: 0 };
     },
   });

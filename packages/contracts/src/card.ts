@@ -1,19 +1,35 @@
 /**
  * 飞书卡片输出契约。
- * 7 种卡片对应 7 条业务主线（qa / recall / summary / slides / archive / crossChat / weekly）。
+ *
+ * 主链路卡片（对应用户可见的关键时刻）：
+ *   activation / docPush / tablePush / qa / summary / slides / archive
+ *
+ * 附属链路卡片：
+ *   offlineSummary / docChange / weekly
+ *
+ * 保留但由 Skill 以纯文本输出（不走 CardBuilder）：
+ *   recall     → Skill 直接返回 SkillResult.text，更像同事随口一句话
+ *   crossChat  → 暂不在主演示路径上
  *
  * 实现层（CardBuilder）负责把这里定义的 Input 渲染成飞书 Card 2.0 JSON。
- * 模板 ID 在飞书卡片搭建工具 (open.feishu.cn/tool/cardbuilder) 上建好后回填。
  */
 
 export type CardTemplateName =
-  | 'qa'
+  // ── 主链路 ──────────────────────────────────
+  | 'activation'     // 群创建后询问是否开启助手
+  | 'docPush'        // 需求文档 / 报告生成后推到群里
+  | 'tablePush'      // 分工多维表格生成后推到群里
+  | 'qa'             // @bot 问答
+  | 'summary'        // 会议 / 阶段总结
+  | 'slides'         // 演示文稿生成
+  | 'archive'        // 项目归档
+  // ── 附属链路 ────────────────────────────────
+  | 'offlineSummary' // 用户重连后的离线期间摘要
+  | 'docChange'      // 重要文档变更通知
+  | 'weekly'         // 周报
+  // ── 保留（Skill 内部用，CardBuilder 可选实现）
   | 'recall'
-  | 'summary'
-  | 'slides'
-  | 'archive'
-  | 'crossChat'
-  | 'weekly';
+  | 'crossChat';
 
 export interface CardSource {
   readonly title: string;
@@ -25,21 +41,40 @@ export interface CardSource {
 
 export interface CardButton {
   readonly text: string;
-  /** 按钮被点时透传的业务参数，进 CardAction.value */
+  /** 按钮被点时透传的业务参数；若 action==='open_url' 则 url 字段生效 */
   readonly value: Record<string, unknown>;
   readonly variant?: 'primary' | 'default' | 'danger';
+}
+
+// ── 主链路 Input ──────────────────────────────────────────────────────────────
+
+export interface ActivationCardInput {
+  readonly chatName: string;
+  /** 可选：展示给管理员的一句话说明 */
+  readonly description?: string;
+}
+
+export interface DocPushCardInput {
+  readonly docTitle: string;
+  readonly docUrl: string;
+  /** 文档类型，影响图标与措辞 */
+  readonly docType: 'requirement' | 'report' | 'minutes' | 'other';
+  /** 可选：一句话内容摘要 */
+  readonly summary?: string;
+}
+
+export interface TablePushCardInput {
+  readonly tableTitle: string;
+  readonly bitableUrl: string;
+  readonly taskCount: number;
+  readonly members: readonly string[];
+  /** 最近一个 DDL，格式 YYYY-MM-DD */
+  readonly nearestDue?: string;
 }
 
 export interface QaCardInput {
   readonly question: string;
   readonly answer: string;
-  readonly sources: readonly CardSource[];
-  readonly buttons?: readonly CardButton[];
-}
-
-export interface RecallCardInput {
-  readonly trigger: string; // "上次/之前/我记得"命中的原句
-  readonly summary: string;
   readonly sources: readonly CardSource[];
   readonly buttons?: readonly CardButton[];
 }
@@ -64,6 +99,48 @@ export interface ArchiveCardInput {
   readonly title: string;
   readonly bitableUrl: string;
   readonly tags: readonly string[];
+  /** 可选：项目一句话成果摘要 */
+  readonly summary?: string;
+}
+
+// ── 附属链路 Input ────────────────────────────────────────────────────────────
+
+export interface OfflineSummaryCardInput {
+  /** 离线开始时间戳（Unix ms） */
+  readonly offlineFrom: number;
+  /** 重连时间戳（Unix ms） */
+  readonly offlineTo: number;
+  /** 按重要性排序的关键事件，最多展示 5 条 */
+  readonly highlights: readonly string[];
+  /** 离线期间群里新消息总数 */
+  readonly messageCount: number;
+}
+
+export interface DocChangeCardInput {
+  readonly editorName: string;
+  readonly docTitle: string;
+  readonly docUrl: string;
+  /** 一句话变更摘要，如"修改了验收标准，新增了两个边界条件" */
+  readonly changeSummary: string;
+  /** 受影响的任务列表（可选） */
+  readonly affectedTasks?: readonly string[];
+}
+
+export interface WeeklyCardInput {
+  readonly weekRange: string; // "2026-04-22 ~ 2026-04-28"
+  readonly highlights: readonly string[];
+  readonly decisions: readonly string[];
+  readonly todos: readonly string[];
+  readonly metrics?: Record<string, number>;
+}
+
+// ── 保留类型（Skill 内部用） ───────────────────────────────────────────────────
+
+export interface RecallCardInput {
+  readonly trigger: string;
+  readonly summary: string;
+  readonly sources: readonly CardSource[];
+  readonly buttons?: readonly CardButton[];
 }
 
 export interface CrossChatCardInput {
@@ -76,23 +153,20 @@ export interface CrossChatCardInput {
   }[];
 }
 
-export interface WeeklyCardInput {
-  readonly weekRange: string; // "2026-04-22 ~ 2026-04-28"
-  readonly highlights: readonly string[];
-  readonly decisions: readonly string[];
-  readonly todos: readonly string[];
-  readonly metrics?: Record<string, number>;
-}
-
 /** 模板 → 输入参数 的映射 */
 export interface CardInputMap {
+  activation: ActivationCardInput;
+  docPush: DocPushCardInput;
+  tablePush: TablePushCardInput;
   qa: QaCardInput;
-  recall: RecallCardInput;
   summary: SummaryCardInput;
   slides: SlidesCardInput;
   archive: ArchiveCardInput;
-  crossChat: CrossChatCardInput;
+  offlineSummary: OfflineSummaryCardInput;
+  docChange: DocChangeCardInput;
   weekly: WeeklyCardInput;
+  recall: RecallCardInput;
+  crossChat: CrossChatCardInput;
 }
 
 /** 渲染后的飞书 Card 2.0 JSON 信封 — 直接喂给 im.message.create */
