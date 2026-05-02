@@ -29,4 +29,5 @@ export async function handleEvent(
   const { card, text } = result.value;
   if (card) await runtime.sendCard({ chatId: event.payload.chatId, card });
   if (text) await runtime.sendText({ chatId: event.payload.chatId, text });
+  logger.info(`skill=${skillName} replied to chat=${event.payload.chatId}`);
 }

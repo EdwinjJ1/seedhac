@@ -51,6 +51,12 @@ async function main(): Promise<void> {
   const { runtime, router, llm, bitable } = buildDeps();
 
   runtime.on(async (event) => {
+    if (event.type === 'message') {
+      const msg = event.payload;
+      const intent = router.route(msg);
+      logger.info(`message received: text="${msg.text}" mentions=${JSON.stringify(msg.mentions.map(m => m.user.userId))} → intent=${intent}`);
+    }
+
     const ctx: SkillContext = {
       event,
       runtime,
