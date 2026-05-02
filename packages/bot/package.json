@@ -17,7 +17,8 @@
   "dependencies": {
     "@larksuiteoapi/node-sdk": "^1.62.1",
     "@seedhac/contracts": "workspace:*",
-    "@seedhac/skills": "workspace:*"
+    "@seedhac/skills": "workspace:*",
+    "chromadb": "^3.4.3"
   },
   "devDependencies": {
     "tsx": "^4.19.0",
