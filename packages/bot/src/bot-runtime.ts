@@ -353,7 +353,7 @@ export class LarkBotRuntime implements BotRuntime {
             message_id: item.message_id,
             chat_id: item.chat_id,
             chat_type: item.chat_type,
-            message_type: item.msg_type,   // list 用 msg_type，receive_v1 用 message_type
+            message_type: (item.message_type ?? item.msg_type),
             content: item.body ? (item.body as Record<string, unknown>).content : item.content,
             create_time: item.create_time,
             mentions: item.mentions ?? [],
