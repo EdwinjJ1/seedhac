@@ -127,7 +127,7 @@ describe('EmbeddingClient', () => {
     vi.clearAllMocks();
   });
 
-  it('text() returns embedding array from API', async () => {
+  it('embed() returns ok with embedding array from API', async () => {
     const embedding = makeEmbedding(0, 1536);
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -135,30 +135,35 @@ describe('EmbeddingClient', () => {
     });
 
     const client = new EmbeddingClient({ apiKey: 'test-key', model: 'ep-test' });
-    const result = await client.text('hello');
+    const result = await client.embed('hello');
 
-    expect(result).toHaveLength(1536);
-    expect(result[0]).toBeCloseTo(embedding[0]!);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toHaveLength(1536);
+      expect(result.value[0]).toBeCloseTo(embedding[0]!);
+    }
   });
 
-  it('text() retries on failure and succeeds on second attempt', async () => {
+  it('embed() retries on failure and returns ok on second attempt', async () => {
     const embedding = makeEmbedding(1, 8);
     mockFetch
       .mockResolvedValueOnce({ ok: false, text: async () => 'server error' })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ data: [{ embedding }] }) });
 
     const client = new EmbeddingClient({ apiKey: 'key', model: 'ep-test' });
-    const result = await client.text('retry test');
+    const result = await client.embed('retry test');
 
-    expect(result).toEqual(embedding);
+    expect(result.ok).toBe(true);
     expect(mockFetch).toHaveBeenCalledTimes(2);
   }, 5_000);
 
-  it('text() throws after 3 failed attempts', async () => {
+  it('embed() returns err after 3 failed attempts', async () => {
     mockFetch.mockResolvedValue({ ok: false, text: async () => 'error' });
 
     const client = new EmbeddingClient({ apiKey: 'key', model: 'ep-test' });
-    await expect(client.text('fail')).rejects.toThrow();
+    const result = await client.embed('fail');
+
+    expect(result.ok).toBe(false);
     expect(mockFetch).toHaveBeenCalledTimes(3);
   }, 10_000);
 });
