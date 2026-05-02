@@ -49,7 +49,7 @@ export class EmbeddingClient {
         if (attempt < 2) await sleep(RETRY_DELAYS_MS[attempt as 0 | 1]);
       }
     }
-    return err(makeError(ErrorCode.FEISHU_API_ERROR, 'embedding failed after 3 attempts', lastErr));
+    return err(makeError(ErrorCode.UNKNOWN, 'embedding failed after 3 attempts', lastErr));
   }
 }
 
