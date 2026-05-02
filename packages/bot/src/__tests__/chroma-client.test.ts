@@ -28,10 +28,7 @@ function makeEmbedding(seed: number, dim = 8): number[] {
 }
 
 function setupCollectionMock(): void {
-  mockGetOrCreateCollection.mockResolvedValue({
-    add: mockAdd,
-    query: mockQuery,
-  });
+  mockGetOrCreateCollection.mockResolvedValue({ add: mockAdd, query: mockQuery });
 }
 
 // ---------- ChromaClient tests ----------
@@ -42,11 +39,11 @@ describe('ChromaClient', () => {
     setupCollectionMock();
   });
 
-  it('insert calls collection.add with correct shape', async () => {
+  it('insert returns ok and calls collection.add with correct shape', async () => {
     mockAdd.mockResolvedValueOnce(undefined);
 
     const client = new ChromaClient();
-    await client.insert({
+    const result = await client.insert({
       messageId: 'msg_1',
       chatId: 'chat_a',
       userId: 'user_x',
@@ -55,6 +52,7 @@ describe('ChromaClient', () => {
       embedding: makeEmbedding(1),
     });
 
+    expect(result.ok).toBe(true);
     expect(mockAdd).toHaveBeenCalledWith(
       expect.objectContaining({
         ids: ['msg_1'],
@@ -63,58 +61,74 @@ describe('ChromaClient', () => {
     );
   });
 
-  it('search returns mapped SearchHit array', async () => {
+  it('insert returns err when collection.add throws', async () => {
+    mockAdd.mockRejectedValueOnce(new Error('chroma down'));
+
+    const result = await new ChromaClient().insert({
+      messageId: 'm', chatId: 'c', userId: 'u', content: 'x', timestamp: 0, embedding: makeEmbedding(0),
+    });
+
+    expect(result.ok).toBe(false);
+  });
+
+  it('search returns ok with mapped SearchHit array', async () => {
     mockQuery.mockResolvedValueOnce({
       ids: [['msg_1', 'msg_2']],
       distances: [[0.1, 0.3]],
       documents: [['hello', 'world']],
-      metadatas: [
-        [
-          { chatId: 'chat_a', userId: 'u1', messageId: 'msg_1', timestamp: 1000 },
-          { chatId: 'chat_a', userId: 'u2', messageId: 'msg_2', timestamp: 2000 },
-        ],
-      ],
+      metadatas: [[
+        { chatId: 'chat_a', userId: 'u1', messageId: 'msg_1', timestamp: 1000 },
+        { chatId: 'chat_a', userId: 'u2', messageId: 'msg_2', timestamp: 2000 },
+      ]],
     });
 
-    const client = new ChromaClient();
-    const hits = await client.search('chat_a', makeEmbedding(0), 2);
+    const result = await new ChromaClient().search('chat_a', makeEmbedding(0), 2);
 
-    expect(hits).toHaveLength(2);
-    expect(hits[0]!.messageId).toBe('msg_1');
-    expect(hits[0]!.distance).toBe(0.1);
-    expect(hits[1]!.content).toBe('world');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toHaveLength(2);
+      expect(result.value[0]!.messageId).toBe('msg_1');
+      expect(result.value[0]!.distance).toBe(0.1);
+      expect(result.value[1]!.content).toBe('world');
+    }
   });
 
   it('search filters by chatId via where clause', async () => {
     mockQuery.mockResolvedValueOnce({ ids: [[]], distances: [[]], documents: [[]], metadatas: [[]] });
 
-    const client = new ChromaClient();
-    await client.search('chat_b', makeEmbedding(0), 5);
+    await new ChromaClient().search('chat_b', makeEmbedding(0), 5);
 
     expect(mockQuery).toHaveBeenCalledWith(
       expect.objectContaining({ where: { chatId: 'chat_b' } }),
     );
   });
 
-  it('search returns empty array when no results', async () => {
+  it('search returns ok with empty array when no results', async () => {
     mockQuery.mockResolvedValueOnce({ ids: [[]], distances: [[]], documents: [[]], metadatas: [[]] });
 
-    const client = new ChromaClient();
-    const hits = await client.search('chat_z', makeEmbedding(0), 5);
+    const result = await new ChromaClient().search('chat_z', makeEmbedding(0), 5);
 
-    expect(hits).toHaveLength(0);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toHaveLength(0);
   });
 
-  it('deleteCollection resets internal collection cache', async () => {
+  it('search returns err when query throws', async () => {
+    mockQuery.mockRejectedValueOnce(new Error('chroma down'));
+
+    const result = await new ChromaClient().search('chat_a', makeEmbedding(0), 5);
+
+    expect(result.ok).toBe(false);
+  });
+
+  it('deleteCollection returns ok and resets collection cache', async () => {
     mockDeleteCollection.mockResolvedValueOnce(undefined);
     mockAdd.mockResolvedValue(undefined);
 
     const client = new ChromaClient();
-    // First insert to populate cache
     await client.insert({ messageId: 'm1', chatId: 'c', userId: 'u', content: 'x', timestamp: 0, embedding: makeEmbedding(0) });
-    await client.deleteCollection();
+    const delResult = await client.deleteCollection();
+    expect(delResult.ok).toBe(true);
 
-    // After delete, next call should re-create collection
     await client.insert({ messageId: 'm2', chatId: 'c', userId: 'u', content: 'y', timestamp: 1, embedding: makeEmbedding(1) });
     expect(mockGetOrCreateCollection).toHaveBeenCalledTimes(2);
   });
@@ -134,8 +148,7 @@ describe('EmbeddingClient', () => {
       json: async () => ({ data: [{ embedding }] }),
     });
 
-    const client = new EmbeddingClient({ apiKey: 'test-key', model: 'ep-test' });
-    const result = await client.embed('hello');
+    const result = await new EmbeddingClient({ apiKey: 'test-key', model: 'ep-test' }).embed('hello');
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -150,20 +163,19 @@ describe('EmbeddingClient', () => {
       .mockResolvedValueOnce({ ok: false, text: async () => 'server error' })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ data: [{ embedding }] }) });
 
-    const client = new EmbeddingClient({ apiKey: 'key', model: 'ep-test' });
-    const result = await client.embed('retry test');
+    const result = await new EmbeddingClient({ apiKey: 'key', model: 'ep-test' }).embed('retry test');
 
     expect(result.ok).toBe(true);
     expect(mockFetch).toHaveBeenCalledTimes(2);
   }, 5_000);
 
-  it('embed() returns err after 3 failed attempts', async () => {
+  it('embed() returns err with UNKNOWN code after 3 failed attempts', async () => {
     mockFetch.mockResolvedValue({ ok: false, text: async () => 'error' });
 
-    const client = new EmbeddingClient({ apiKey: 'key', model: 'ep-test' });
-    const result = await client.embed('fail');
+    const result = await new EmbeddingClient({ apiKey: 'key', model: 'ep-test' }).embed('fail');
 
     expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('UNKNOWN');
     expect(mockFetch).toHaveBeenCalledTimes(3);
   }, 10_000);
 });
