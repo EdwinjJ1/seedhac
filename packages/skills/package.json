@@ -2,7 +2,7 @@
   "name": "@seedhac/skills",
   "version": "0.1.0",
   "private": true,
-  "description": "SeedHAC 7 条业务主线 Skill 实现（v0.1 stub）",
+  "description": "Lark Loom 7 条业务主线 Skill 实现（stub）",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {

@@ -1,8 +1,8 @@
 /**
  * SkillRouter — 飞书消息 → 业务意图分类。
  *
- * RouteIntent 是 bot 包内部类型，对应 PDF 里的实际 Skill 粒度，
- * 不依赖 contracts/SkillName（contracts 改动需三人 review，等复赛后再对齐）。
+ * RouteIntent 是 bot 包内部类型，与 contracts/SkillName 解耦
+ * （contracts 改动需三人 review，路由意图迭代频率高，先放本包）。
  *
  * 双轨制：
  *   - qa           唯一需要 @bot（避免对组员间普通问句乱插话）
@@ -24,12 +24,10 @@ export type RouteIntent =
   | 'requirementDoc'   // 需求整理 — 听到项目需求/资料
   | 'silent';          // 不处理
 
-/** @deprecated 兼容旧命名，后续统一用 RouteIntent */
-export type RouteResult = RouteIntent;
-
 interface RouteRule {
   readonly intent: Exclude<RouteIntent, 'silent'>;
-  readonly requiresMention: boolean;
+  /** 与 contracts/Skill.trigger.requireMention 同名，语义一致：是否要求 @bot */
+  readonly requireMention: boolean;
   readonly patterns: readonly RegExp[];
 }
 
@@ -38,7 +36,7 @@ const RULES: readonly RouteRule[] = [
   // ── qa：唯一需要 @bot ─────────────────────────────────────────────
   {
     intent: 'qa',
-    requiresMention: true,
+    requireMention: true,
     patterns: [
       /是什么/,
       /怎么/,
@@ -57,7 +55,7 @@ const RULES: readonly RouteRule[] = [
   // ── taskAssignment：分工讨论（被动）───────────────────────────────
   {
     intent: 'taskAssignment',
-    requiresMention: false,
+    requireMention: false,
     patterns: [
       /你来负责/,
       /我来负责/,
@@ -77,7 +75,7 @@ const RULES: readonly RouteRule[] = [
   // ── progressUpdate：进展汇报（被动）──────────────────────────────
   {
     intent: 'progressUpdate',
-    requiresMention: false,
+    requireMention: false,
     patterns: [
       /完成了/,
       /做完了/,
@@ -94,7 +92,7 @@ const RULES: readonly RouteRule[] = [
   // ── meetingNotes：会议纪要进群（被动）────────────────────────────
   {
     intent: 'meetingNotes',
-    requiresMention: false,
+    requireMention: false,
     patterns: [
       /会议纪要/,
       /妙记/,
@@ -107,7 +105,7 @@ const RULES: readonly RouteRule[] = [
   // ── slides：需要做 PPT 汇报（被动）──────────────────────────────
   {
     intent: 'slides',
-    requiresMention: false,
+    requireMention: false,
     patterns: [
       /ppt/i,
       /幻灯片/,
@@ -121,7 +119,7 @@ const RULES: readonly RouteRule[] = [
   // ── requirementDoc：项目需求/资料（被动，最宽泛放最后）──────────
   {
     intent: 'requirementDoc',
-    requiresMention: false,
+    requireMention: false,
     patterns: [
       /项目需求/,
       /需求文档/,
@@ -153,7 +151,7 @@ export class SkillRouter {
     const mentioned = this.mentionsBot(msg);
 
     for (const rule of RULES) {
-      if (rule.requiresMention && !mentioned) continue;
+      if (rule.requireMention && !mentioned) continue;
       if (rule.patterns.some((p) => p.test(text))) {
         return rule.intent;
       }

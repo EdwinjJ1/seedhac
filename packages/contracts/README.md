@@ -1,6 +1,8 @@
 # @seedhac/contracts
 
-> SeedHAC / Sentinel **跨包接口契约**单一来源。所有 `interface` / `type` / `Schema` 都在这里。
+> Lark Loom **跨包接口契约**单一来源。所有 `interface` / `type` / `Schema` 都在这里。
+
+> 注：包名仍为 `@seedhac/*` 以避免大规模 import 改动；产品名是 Lark Loom。
 
 ## 改这个包的规则
 
@@ -70,7 +72,7 @@ export const qaSkill: Skill = {
 
 ## 版本
 
-v0.1 — 初始冻结。覆盖 7 条业务主线最小集。
+初始冻结，覆盖 7 条业务主线最小集。
 
 下一步可能扩展点（不算"改契约"）：
 - Bitable 4 张表的 Row 类型从 `Record<string, unknown>` 收紧到具体接口
