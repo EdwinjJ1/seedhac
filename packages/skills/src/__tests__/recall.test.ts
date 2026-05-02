@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { recallSkill } from '../recall.js';
-import type { SkillContext, BotEvent, Message, Result, RetrieveHit } from '@seedhac/contracts';
+import type { SkillContext, BotEvent, Message, Result, RetrieveHit, SkillResult } from '@seedhac/contracts';
 
 // ── mock helpers ────────────────────────────────────────────────────────────
 
@@ -100,7 +100,7 @@ describe('recallSkill', () => {
     mockBitableRetrieve.mockResolvedValueOnce({ ok: true, value: [makeHit('h2', '已核定 10 万预算')] });
     mockLLMAsk.mockResolvedValueOnce({ ok: true, value: '项目预算是 10 万，上次会议已确认。' });
 
-    const result: Result<import('@seedhac/contracts').SkillResult> = await recallSkill.run(ctx);
+    const result: Result<SkillResult> = await recallSkill.run(ctx);
 
     expect(result.ok).toBe(true);
     if (result.ok) {
