@@ -13,6 +13,7 @@ import {
   type Result,
   type BitableClient,
   ok,
+  err,
 } from '@seedhac/contracts';
 
 export class BitableRetriever implements Retriever {
@@ -25,11 +26,11 @@ export class BitableRetriever implements Retriever {
 
     const result = await this.bitable.find({
       table: 'memory',
-      filter: query.chatId ? `AND(CurrentValue.[chatId]="${query.chatId}")` : undefined,
+      ...(query.chatId ? { filter: `AND(CurrentValue.[chatId]="${query.chatId}")` } : {}),
       pageSize: topK,
     });
 
-    if (!result.ok) return ok([]);
+    if (!result.ok) return err(result.error);
 
     const hits: RetrieveHit[] = result.value.records.map((r) => ({
       source: 'bitable' as RetrieverSource,

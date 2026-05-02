@@ -26,7 +26,7 @@ describe('VectorRetriever', () => {
 
   it('retrieve returns LLM-reranked RetrieveHit array', async () => {
     mockEmbeddingEmbed.mockResolvedValueOnce({ ok: true, value: [0.1, 0.2] });
-    mockChromaSearch.mockResolvedValueOnce([makeHit(1), makeHit(2), makeHit(3)]);
+    mockChromaSearch.mockResolvedValueOnce({ ok: true, value: [makeHit(1), makeHit(2), makeHit(3)] });
     mockLLMAsk.mockResolvedValueOnce({ ok: true, value: '["msg_3","msg_1"]' });
 
     const result = await makeRetriever().retrieve({ query: 'test', chatId: 'chat_a', topK: 2 });
@@ -50,7 +50,7 @@ describe('VectorRetriever', () => {
 
   it('retrieve returns empty when Chroma has no hits', async () => {
     mockEmbeddingEmbed.mockResolvedValueOnce({ ok: true, value: [0.1] });
-    mockChromaSearch.mockResolvedValueOnce([]);
+    mockChromaSearch.mockResolvedValueOnce({ ok: true, value: [] });
 
     const result = await makeRetriever().retrieve({ query: 'test', chatId: 'chat_a' });
 
@@ -61,7 +61,7 @@ describe('VectorRetriever', () => {
 
   it('retrieve falls back to Chroma order when LLM fails', async () => {
     mockEmbeddingEmbed.mockResolvedValueOnce({ ok: true, value: [0.1] });
-    mockChromaSearch.mockResolvedValueOnce([makeHit(1), makeHit(2)]);
+    mockChromaSearch.mockResolvedValueOnce({ ok: true, value: [makeHit(1), makeHit(2)] });
     mockLLMAsk.mockResolvedValueOnce({ ok: false, error: { code: 'LLM_TIMEOUT', message: 'timeout' } });
 
     const result = await makeRetriever().retrieve({ query: 'test', chatId: 'chat_a', topK: 2 });
@@ -74,7 +74,7 @@ describe('VectorRetriever', () => {
 
   it('retrieve falls back when LLM returns invalid JSON', async () => {
     mockEmbeddingEmbed.mockResolvedValueOnce({ ok: true, value: [0.1] });
-    mockChromaSearch.mockResolvedValueOnce([makeHit(1), makeHit(2)]);
+    mockChromaSearch.mockResolvedValueOnce({ ok: true, value: [makeHit(1), makeHit(2)] });
     mockLLMAsk.mockResolvedValueOnce({ ok: true, value: 'not json' });
 
     const result = await makeRetriever().retrieve({ query: 'test', chatId: 'chat_a', topK: 2 });
@@ -85,7 +85,7 @@ describe('VectorRetriever', () => {
 
   it('retrieve handles LLM response with markdown code fence', async () => {
     mockEmbeddingEmbed.mockResolvedValueOnce({ ok: true, value: [0.1] });
-    mockChromaSearch.mockResolvedValueOnce([makeHit(1), makeHit(2)]);
+    mockChromaSearch.mockResolvedValueOnce({ ok: true, value: [makeHit(1), makeHit(2)] });
     mockLLMAsk.mockResolvedValueOnce({ ok: true, value: '```json\n["msg_2","msg_1"]\n```' });
 
     const result = await makeRetriever().retrieve({ query: 'test', chatId: 'chat_a', topK: 2 });

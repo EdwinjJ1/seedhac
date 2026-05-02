@@ -14,10 +14,8 @@ import {
   type LLMClient,
   ok,
   err,
-  ErrorCode,
-  makeError,
 } from '@seedhac/contracts';
-import { type ChromaClient } from './chroma-client.js';
+import { type ChromaClient, type SearchHit } from './chroma-client.js';
 import { type EmbeddingClient } from './embedding-client.js';
 
 const CHROMA_CANDIDATE_SIZE = 50;
@@ -35,12 +33,14 @@ export class VectorRetriever implements Retriever {
     const vecResult = await this.embedding.embed(query.query);
     if (!vecResult.ok) return err(vecResult.error);
 
-    const hits = await this.chroma.search(
+    const searchResult = await this.chroma.search(
       query.chatId ?? '',
       vecResult.value,
       CHROMA_CANDIDATE_SIZE,
     );
+    if (!searchResult.ok) return err(searchResult.error);
 
+    const hits = searchResult.value;
     if (hits.length === 0) return ok([]);
 
     const topK = query.topK ?? 3;
@@ -48,11 +48,7 @@ export class VectorRetriever implements Retriever {
     return ok(reranked);
   }
 
-  private async rerank(
-    query: string,
-    hits: Awaited<ReturnType<ChromaClient['search']>>,
-    topK: number,
-  ): Promise<readonly RetrieveHit[]> {
+  private async rerank(query: string, hits: SearchHit[], topK: number): Promise<readonly RetrieveHit[]> {
     const list = hits
       .map((h, i) => `[${i + 1}] id=${h.messageId}\n${h.content}`)
       .join('\n\n');
@@ -85,16 +81,14 @@ ${list}
     if (orderedIds.length > 0) {
       return orderedIds.slice(0, topK).flatMap((id) => {
         const h = hitMap.get(id);
-        if (!h) return [];
-        return [this.toRetrieveHit(h)];
+        return h ? [this.toRetrieveHit(h)] : [];
       });
     }
 
-    // 降级：按 Chroma 距离排序
     return hits.slice(0, topK).map((h) => this.toRetrieveHit(h));
   }
 
-  private toRetrieveHit(h: { messageId: string; chatId: string; content: string; timestamp: number; distance: number }): RetrieveHit {
+  private toRetrieveHit(h: SearchHit): RetrieveHit {
     return {
       source: 'vector',
       id: h.messageId,

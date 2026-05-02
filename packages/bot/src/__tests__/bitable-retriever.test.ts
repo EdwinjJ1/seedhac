@@ -38,13 +38,12 @@ describe('BitableRetriever', () => {
     }
   });
 
-  it('retrieve returns empty array when Bitable returns err', async () => {
+  it('retrieve returns err when Bitable returns err', async () => {
     mockBitableFind.mockResolvedValueOnce({ ok: false, error: { code: 'FEISHU_API_ERROR', message: 'fail' } });
 
     const result = await makeRetriever().retrieve({ query: '', chatId: 'chat_a' });
 
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.value).toHaveLength(0);
+    expect(result.ok).toBe(false);
   });
 
   it('retrieve passes chatId filter to Bitable', async () => {
