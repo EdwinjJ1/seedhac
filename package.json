@@ -2,7 +2,7 @@
   "name": "seedhac",
   "version": "0.1.0",
   "private": true,
-  "description": "SeedHAC / Sentinel — 飞书 AI 校园挑战赛参赛项目",
+  "description": "Lark Loom — 飞书 AI 校园挑战赛参赛项目",
   "engines": {
     "node": ">=20.0.0",
     "pnpm": ">=8.0.0"
@@ -10,14 +10,14 @@
   "packageManager": "pnpm@9.12.0",
   "scripts": {
     "build": "pnpm -r build",
-    "clean": "pnpm -r exec rm -rf dist .tsbuildinfo",
+    "clean": "pnpm -r exec rm -rf dist .tsbuildinfo tsconfig.tsbuildinfo",
     "dev": "pnpm --filter @seedhac/bot dev",
     "lint": "eslint \"packages/*/src/**/*.ts\"",
     "lint:fix": "eslint \"packages/*/src/**/*.ts\" --fix",
     "format": "prettier --write \"packages/*/src/**/*.{ts,json,md}\"",
     "format:check": "prettier --check \"packages/*/src/**/*.{ts,json,md}\"",
     "test": "pnpm -r test",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "tsc -b packages/contracts packages/skills packages/bot"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",

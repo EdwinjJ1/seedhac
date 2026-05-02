@@ -2,7 +2,7 @@
   "name": "@seedhac/bot",
   "version": "0.1.0",
   "private": true,
-  "description": "SeedHAC 飞书 bot 进程入口（WSClient + Skill Router + 限流）",
+  "description": "Lark Loom 飞书 bot 进程入口（WSClient + Skill Router + 限流）",
   "main": "dist/index.js",
   "type": "module",
   "scripts": {
