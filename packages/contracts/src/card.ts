@@ -16,17 +16,17 @@
 
 export type CardTemplateName =
   // ── 主链路 ──────────────────────────────────
-  | 'activation'     // 群创建后询问是否开启助手
-  | 'docPush'        // 需求文档 / 报告生成后推到群里
-  | 'tablePush'      // 分工多维表格生成后推到群里
-  | 'qa'             // @bot 问答
-  | 'summary'        // 会议 / 阶段总结
-  | 'slides'         // 演示文稿生成
-  | 'archive'        // 项目归档
+  | 'activation' // 群创建后询问是否开启助手
+  | 'docPush' // 需求文档 / 报告生成后推到群里
+  | 'tablePush' // 分工多维表格生成后推到群里
+  | 'qa' // @bot 问答
+  | 'summary' // 会议 / 阶段总结
+  | 'slides' // 演示文稿生成
+  | 'archive' // 项目归档
   // ── 附属链路 ────────────────────────────────
   | 'offlineSummary' // 用户重连后的离线期间摘要
-  | 'docChange'      // 重要文档变更通知
-  | 'weekly'         // 周报
+  | 'docChange' // 重要文档变更通知
+  | 'weekly' // 周报
   // ── 保留（Skill 内部用，CardBuilder 可选实现）
   | 'recall'
   | 'crossChat';

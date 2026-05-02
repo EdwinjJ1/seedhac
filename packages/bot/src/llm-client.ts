@@ -144,7 +144,12 @@ export class VolcanoLLMClient implements LLMClient {
         const promptTokens = data.usage?.prompt_tokens ?? 0;
         const completionTokens = data.usage?.completion_tokens ?? 0;
 
-        logCall({ model: modelId, promptTokens, completionTokens, durationMs: Date.now() - startMs });
+        logCall({
+          model: modelId,
+          promptTokens,
+          completionTokens,
+          durationMs: Date.now() - startMs,
+        });
 
         return ok({ content, promptTokens, completionTokens });
       } catch (e) {
