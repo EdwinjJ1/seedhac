@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { LarkBotRuntime } from '../bot-runtime.js';
-import type { EventHandler } from '@seedhac/contracts';
+import type { EventHandler, Card } from '@seedhac/contracts';
 
 // ─── SDK mock ────────────────────────────────────────────────────────────────
 
@@ -114,7 +114,7 @@ describe('LarkBotRuntime', () => {
   it('sendCard calls SDK create with msg_type interactive', async () => {
     mockMessageCreate.mockResolvedValue({ code: 0, data: { message_id: 'msg_3' } });
     const runtime = makeRuntime();
-    const card = { type: 'card', header: { title: 'test' } } as unknown as import('@seedhac/contracts').Card;
+    const card = { type: 'card', header: { title: 'test' } } as unknown as Card;
 
     const result = await runtime.sendCard({ chatId: 'oc_chat1', card });
 
@@ -175,7 +175,7 @@ describe('LarkBotRuntime', () => {
   it('patchCard throttles to 500ms per messageId', async () => {
     mockMessagePatch.mockResolvedValue({ code: 0 });
     const runtime = makeRuntime();
-    const card = {} as unknown as import('@seedhac/contracts').Card;
+    const card = {} as unknown as Card;
 
     const t0 = Date.now();
     await runtime.patchCard({ messageId: 'msg_p1', card });
