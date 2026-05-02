@@ -22,7 +22,6 @@ import type {
   CardInputMap,
   CardSource,
   CardTemplateName,
-  CrossChatCardInput,
   DocChangeCardInput,
   DocPushCardInput,
   OfflineSummaryCardInput,
@@ -360,25 +359,6 @@ function buildRecall(input: RecallCardInput): Card {
   });
 }
 
-function buildCrossChat(input: CrossChatCardInput): Card {
-  const elements: BodyElement[] = [md(`**跨群搜索**\n"${input.query}"`), hr()];
-  if (!input.hits.length) {
-    elements.push(md('未找到相关记录。'));
-  } else {
-    elements.push(
-      md(input.hits.map((h) => {
-        const time = new Date(h.timestamp).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
-        return `**${h.chatName}** · ${time}\n> ${h.snippet}`;
-      }).join('\n\n')),
-    );
-  }
-  return card('crossChat', {
-    schema: '2.0',
-    header: { title: pt('跨群信息检索'), template: 'violet' },
-    body: { elements },
-  });
-}
-
 // ─── CardBuilder 实现 ─────────────────────────────────────────────────────────
 
 const builders: { [K in CardTemplateName]: (input: CardInputMap[K]) => Card } = {
@@ -393,7 +373,6 @@ const builders: { [K in CardTemplateName]: (input: CardInputMap[K]) => Card } = 
   docChange: buildDocChange,
   weekly: buildWeekly,
   recall: buildRecall,
-  crossChat: buildCrossChat,
 };
 
 export const larkCardBuilder: CardBuilder = {
