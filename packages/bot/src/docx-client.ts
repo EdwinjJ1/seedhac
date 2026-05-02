@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import type * as lark from '@larksuiteoapi/node-sdk';
+import * as lark from '@larksuiteoapi/node-sdk';
 import {
   ErrorCode,
   err,
@@ -41,20 +41,20 @@ export class LarkDocxClient implements DocxClient {
 
   async appendBlocks(docToken: string, blocks: readonly DocBlock[]): Promise<Result<void>> {
     try {
-      const larkBlocks = blocks.map((block) => {
+      const children = blocks.map((block) => {
         switch (block.type) {
           case 'heading1':
             return {
-              block_type: 2,
+              block_type: 3,
               heading1: { elements: [{ text_run: { content: block.text } }] },
             };
           case 'heading2':
             return {
-              block_type: 3,
+              block_type: 4,
               heading2: { elements: [{ text_run: { content: block.text } }] },
             };
           case 'paragraph':
-            return { block_type: 1, text: { elements: [{ text_run: { content: block.text } }] } };
+            return { block_type: 2, text: { elements: [{ text_run: { content: block.text } }] } };
           case 'bullet':
             return {
               block_type: 12,
@@ -63,21 +63,12 @@ export class LarkDocxClient implements DocxClient {
         }
       });
 
-      const res = await (this.client.docx.v1.documentBlock as any).batchUpdate({
+      const res = await (this.client.docx.v1.documentBlockChildren as any).create({
         path: {
           document_id: docToken,
           block_id: docToken,
         },
-        data: {
-          requests: [
-            {
-              insert_blocks_request: {
-                payload: JSON.stringify(larkBlocks),
-                payload_document_revision_id: -1,
-              },
-            },
-          ],
-        },
+        data: { children },
       });
 
       if (res.code !== 0) {
@@ -93,19 +84,17 @@ export class LarkDocxClient implements DocxClient {
 
   async getShareLink(docToken: string): Promise<Result<string>> {
     try {
-      const res = await (this.client.drive.v1.file as any).createShareLink({
-        data: {
-          token: docToken,
-          type: 'doc',
-          link_share_entity: 'anyone_readable',
-        },
+      const res = await (this.client.drive.v1.permissionPublic as any).patch({
+        params: { type: 'docx' },
+        path: { token: docToken },
+        data: { link_share_entity: 'tenant_readable' },
       });
 
       if (res.code !== 0) {
-        return err(makeError(ErrorCode.FEISHU_API_ERROR, `create share link failed: ${res.msg}`));
+        return err(makeError(ErrorCode.FEISHU_API_ERROR, `set share permission failed: ${res.msg}`));
       }
 
-      return ok(res.data?.share_link?.share_url || '');
+      return ok(`https://feishu.cn/docx/${docToken}`);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       return err(makeError(ErrorCode.FEISHU_API_ERROR, `get share link error: ${msg}`));
@@ -145,4 +134,14 @@ export class LarkDocxClient implements DocxClient {
 
     return ok(createRes.value);
   }
+}
+
+export function createDocxClient(): LarkDocxClient {
+  const appId = process.env['LARK_APP_ID'];
+  const appSecret = process.env['LARK_APP_SECRET'];
+  if (!appId) throw new Error('Missing required env var: LARK_APP_ID');
+  if (!appSecret) throw new Error('Missing required env var: LARK_APP_SECRET');
+
+  const client = new lark.Client({ appId, appSecret });
+  return new LarkDocxClient(client);
 }
