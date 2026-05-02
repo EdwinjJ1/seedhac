@@ -5,8 +5,8 @@
  * 数据流：群历史检索 / Wiki / Bitable → LLM 整合 → qa 卡片
  */
 
-import type { Skill } from '@seedhac/contracts';
-import { ErrorCode, err, makeError } from '@seedhac/contracts';
+import type { Message, Skill } from '@seedhac/contracts';
+import { ok } from '@seedhac/contracts';
 
 export const qaSkill: Skill = {
   name: 'qa',
@@ -16,6 +16,17 @@ export const qaSkill: Skill = {
     keywords: ['?', '？', '吗', '呢'],
     description: '@bot + 疑问句 → 检索群历史回答',
   },
-  match: () => false, // TODO: 实现关键词 / LLM 判断
-  run: async () => err(makeError(ErrorCode.SKILL_NOT_IMPLEMENTED, 'qa skill not implemented')),
+  match: (ctx) => {
+    const msg = ctx.event.payload as Message;
+    return (
+      msg.mentions.some((m) => m.user.userId === process.env['LARK_BOT_OPEN_ID']) &&
+      /[?？]/.test(msg.text)
+    );
+  },
+  run: async (ctx) => {
+    const msg = ctx.event.payload as Message;
+    return ok({
+      text: `（Mock）收到问题：「${msg.text}」\n真实回答逻辑待 #NEW-4 实现。`,
+    });
+  },
 };
