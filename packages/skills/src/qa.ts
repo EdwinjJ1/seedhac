@@ -18,10 +18,7 @@ export const qaSkill: Skill = {
   },
   match: (ctx) => {
     const msg = ctx.event.payload as Message;
-    return (
-      msg.mentions.some((m) => m.user.userId === process.env['LARK_BOT_OPEN_ID']) &&
-      /[?？]/.test(msg.text)
-    );
+    return msg.mentions.some((m) => m.user.userId === process.env['LARK_BOT_OPEN_ID']);
   },
   run: async (ctx) => {
     const msg = ctx.event.payload as Message;

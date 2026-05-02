@@ -60,9 +60,9 @@ describe('qaSkill.match()', () => {
     process.env['LARK_BOT_OPEN_ID'] = BOT_ID;
   });
 
-  // 1. @bot + 问号 → match() 返回 true
-  it('@bot + 问号 → returns true', () => {
-    const msg = makeMessage({ text: '这个功能怎么用？', mentions: [{ user: { userId: BOT_ID }, key: '@_bot' }] });
+  // 1. @bot → match() 返回 true（不要求问号）
+  it('@bot → returns true regardless of question mark', () => {
+    const msg = makeMessage({ text: '帮我查一下上周的会议记录', mentions: [{ user: { userId: BOT_ID }, key: '@_bot' }] });
     const ctx = makeCtx(makeEvent(msg));
     expect(qaSkill.match(ctx)).toBe(true);
   });
