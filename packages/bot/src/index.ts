@@ -1,4 +1,3 @@
-import * as lark from '@larksuiteoapi/node-sdk';
 import type { Logger, SkillContext } from '@seedhac/contracts';
 import { skillsByName } from '@seedhac/skills';
 import { createBotRuntime } from './bot-runtime.js';
@@ -45,8 +44,7 @@ function buildDeps() {
     },
   });
 
-  const larkClient = new lark.Client({ appId, appSecret });
-  const docx = new LarkDocxClient(larkClient);
+  const docx = createDocxClient();
 
   return { runtime, router, llm, bitable, docx };
 }
@@ -80,7 +78,6 @@ async function main(): Promise<void> {
       docx,
       retrievers: {},
       logger,
-      docx: createDocxClient(),
       cardBuilder: larkCardBuilder,
     };
     await handleEvent(ctx, router, skillsByName);
