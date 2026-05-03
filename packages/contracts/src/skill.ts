@@ -17,6 +17,7 @@ import type { BotEvent } from './message.js';
 import type { Retriever } from './retriever.js';
 import type { Result } from './result.js';
 import type { DocxClient } from './docx.js';
+import type { SlidesClient } from './slides.js';
 
 /** 8 条主线对应的稳定字符串 ID */
 export type SkillName =
@@ -61,6 +62,7 @@ export interface SkillContext {
   readonly retrievers: Readonly<Record<string, Retriever>>;
   readonly logger: Logger;
   readonly docx: DocxClient;
+  readonly slides?: SlidesClient;
   readonly cardBuilder: CardBuilder;
 }
 

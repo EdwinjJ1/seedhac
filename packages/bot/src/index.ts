@@ -5,6 +5,7 @@ import { LarkBitableClient } from './bitable-client.js';
 import { larkCardBuilder } from './card-builder.js';
 import { createDocxClient } from './docx-client.js';
 import { VolcanoLLMClient } from './llm-client.js';
+import { createSlidesClient } from './slides-client.js';
 import { SkillRouter } from './skill-router.js';
 import { handleEvent } from './wiring.js';
 
@@ -45,14 +46,15 @@ function buildDeps() {
   });
 
   const docx = createDocxClient();
+  const slides = createSlidesClient();
 
-  return { runtime, router, llm, bitable, docx };
+  return { runtime, router, llm, bitable, docx, slides };
 }
 
 async function main(): Promise<void> {
   logger.info('booting');
 
-  const { runtime, router, llm, bitable, docx } = buildDeps();
+  const { runtime, router, llm, bitable, docx, slides } = buildDeps();
 
   runtime.on(async (event) => {
     if (event.type === 'message') {
@@ -76,6 +78,7 @@ async function main(): Promise<void> {
       llm,
       bitable,
       docx,
+      slides,
       cardBuilder: larkCardBuilder,
       retrievers: {},
       logger,

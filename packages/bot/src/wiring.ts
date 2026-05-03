@@ -32,8 +32,26 @@ export async function handleEvent(
     return;
   }
   const { card, text } = result.value;
-  if (card) await runtime.sendCard({ chatId: event.payload.chatId, card });
-  if (text) await runtime.sendText({ chatId: event.payload.chatId, text });
+  if (card) {
+    const sendResult = await runtime.sendCard({ chatId: event.payload.chatId, card });
+    if (!sendResult.ok) {
+      logger.error('send card failed', {
+        code: sendResult.error.code,
+        message: sendResult.error.message,
+      });
+      return;
+    }
+  }
+  if (text) {
+    const sendResult = await runtime.sendText({ chatId: event.payload.chatId, text });
+    if (!sendResult.ok) {
+      logger.error('send text failed', {
+        code: sendResult.error.code,
+        message: sendResult.error.message,
+      });
+      return;
+    }
+  }
   logger.info(`skill=${skillName} replied to chat=${event.payload.chatId}`);
 }
 

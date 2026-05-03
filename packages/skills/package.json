@@ -19,8 +19,8 @@
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run src",
-    "clean": "rm -rf dist .tsbuildinfo"
+    "clean": "rm -rf dist .tsbuildinfo",
+    "test": "vitest run"
   },
   "dependencies": {
     "@seedhac/contracts": "workspace:*"

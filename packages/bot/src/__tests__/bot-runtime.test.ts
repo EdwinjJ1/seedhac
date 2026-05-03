@@ -115,8 +115,8 @@ describe('LarkBotRuntime', () => {
     mockMessageCreate.mockResolvedValue({ code: 0, data: { message_id: 'msg_3' } });
     const runtime = makeRuntime();
     const card = {
-      templateName: 'qa',
-      content: { schema: '2.0', header: { title: 'test' } },
+      templateName: 'slides',
+      content: { schema: '2.0', header: { title: { tag: 'plain_text', content: 'test' } } },
     } as unknown as Card;
 
     const result = await runtime.sendCard({ chatId: 'oc_chat1', card });
@@ -126,7 +126,7 @@ describe('LarkBotRuntime', () => {
     const callArgs = mockMessageCreate.mock.calls[0]![0];
     expect(callArgs.data.msg_type).toBe('interactive');
     expect(JSON.parse(callArgs.data.content)).toEqual(card.content);
-    expect(callArgs.data.content).not.toContain('templateName');
+    expect(JSON.parse(callArgs.data.content)).not.toHaveProperty('templateName');
   });
 
   // 4. fetchHistory → 返回正确的 FetchHistoryResult
@@ -180,7 +180,10 @@ describe('LarkBotRuntime', () => {
   it('patchCard throttles to 500ms per messageId', async () => {
     mockMessagePatch.mockResolvedValue({ code: 0 });
     const runtime = makeRuntime();
-    const card = {} as unknown as Card;
+    const card = {
+      templateName: 'slides',
+      content: { schema: '2.0', body: { elements: [] } },
+    } as unknown as Card;
 
     const t0 = Date.now();
     await runtime.patchCard({ messageId: 'msg_p1', card });
@@ -188,6 +191,8 @@ describe('LarkBotRuntime', () => {
     const elapsed = Date.now() - t0;
 
     expect(mockMessagePatch).toHaveBeenCalledTimes(2);
+    const callArgs = mockMessagePatch.mock.calls[0]![0];
+    expect(JSON.parse(callArgs.data.content)).toEqual(card.content);
     expect(elapsed).toBeGreaterThanOrEqual(490); // 留 10ms 误差
   });
 
