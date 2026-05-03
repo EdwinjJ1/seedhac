@@ -90,9 +90,10 @@ function detectUnansweredQuestion(messages: readonly Message[]): string | null {
   if (messages.length < 2) return null;
   const first = messages[0]!;
   // 中文没有 \b 词边界，直接含义匹配
+  // 不把"啥"算疑问词——避免"中午吃啥"误报
   const isQuestion =
     /[?？]/.test(first.text) ||
-    /(多少|怎么|哪个|哪些|几个|是不是|何时|什么时候|啥)/.test(first.text);
+    /(多少|怎么|哪个|哪些|几个|是不是|何时|什么时候)/.test(first.text);
   if (!isQuestion) return null;
 
   const rest = messages.slice(1);
