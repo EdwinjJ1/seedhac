@@ -259,8 +259,8 @@ describe('silent', () => {
     expect(router.route(makeMsg({ text: '', contentType: 'sticker' }))).toBe('silent');
   });
 
-  it('pos: @bot 但无任何关键词 → silent', () => {
-    expect(router.route(atBot('哈哈哈哈'))).toBe('silent');
+  it('pos: @bot 无疑问词但有内容 → qa（兜底响应）', () => {
+    expect(router.route(atBot('哈哈哈哈'))).toBe('qa');
   });
 
   it('pos: @其他人（非 bot）→ silent', () => {
