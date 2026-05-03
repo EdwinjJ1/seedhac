@@ -47,6 +47,7 @@ function makeCtx(event: BotEvent, runtimeOverride?: BotRuntime): SkillContext {
     llm: {} as SkillContext['llm'],
     bitable: {} as SkillContext['bitable'],
     docx: {} as SkillContext['docx'],
+    cardBuilder: { build: vi.fn().mockReturnValue({ templateName: 'qa', content: {} }) } as unknown as SkillContext['cardBuilder'],
     retrievers: {},
     logger: {
       debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(),

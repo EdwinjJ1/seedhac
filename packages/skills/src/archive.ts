@@ -61,17 +61,16 @@ export const archiveSkill: Skill = {
     const summaryText = llmResult.value.trim();
     const recordId = `archive_${chatId}_${Date.now()}`;
 
+    const card = ctx.cardBuilder.build('archive', {
+      recordId,
+      title: '项目归档',
+      bitableUrl: '',
+      tags: [],
+      summary: summaryText,
+    });
+
     return ok({
-      card: {
-        templateName: 'archive',
-        content: {
-          recordId,
-          title: '项目归档',
-          bitableUrl: '',
-          tags: [],
-          summary: summaryText,
-        },
-      },
+      card,
       reasoning: `归档 ${decisions.length} 条决策，${todos.length} 条任务`,
     });
   },

@@ -11,7 +11,7 @@
 
 import type { BitableClient } from './bitable.js';
 import type { BotRuntime } from './bot-runtime.js';
-import type { Card } from './card.js';
+import type { Card, CardBuilder } from './card.js';
 import type { LLMClient } from './llm.js';
 import type { BotEvent } from './message.js';
 import type { Retriever } from './retriever.js';
@@ -61,6 +61,7 @@ export interface SkillContext {
   readonly retrievers: Readonly<Record<string, Retriever>>;
   readonly logger: Logger;
   readonly docx: DocxClient;
+  readonly cardBuilder: CardBuilder;
 }
 
 /** Skill 副作用：写 Bitable / 调外部 webhook / 触发其他 skill 等 */

@@ -4,6 +4,7 @@ import type { SkillContext, BotEvent, Message } from '@seedhac/contracts';
 
 const mockLLMAsk = vi.fn();
 const mockBitableFind = vi.fn();
+const mockCardBuilderBuild = vi.fn().mockReturnValue({ templateName: 'archive', content: { built: true } });
 
 function makeMessage(text: string): Message {
   return {
@@ -29,6 +30,8 @@ function makeCtx(event: BotEvent): SkillContext {
     runtime: { fetchHistory: vi.fn(), sendText: vi.fn(), sendCard: vi.fn(), patchCard: vi.fn(), on: vi.fn(), start: vi.fn(), stop: vi.fn() },
     llm: { ask: mockLLMAsk, chat: vi.fn(), askStructured: vi.fn() },
     bitable: { find: mockBitableFind, insert: vi.fn(), batchInsert: vi.fn(), update: vi.fn(), delete: vi.fn(), link: vi.fn() },
+    docx: {} as SkillContext['docx'],
+    cardBuilder: { build: mockCardBuilderBuild },
     retrievers: {},
     logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
   } as unknown as SkillContext;
@@ -66,11 +69,11 @@ describe('archiveSkill', () => {
     const result = await archiveSkill.run(makeCtx(makeEvent('项目结束，归档一下')));
 
     expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.value.card?.templateName).toBe('archive');
-      expect(result.value.card?.content['summary']).toContain('项目');
-    }
+    if (result.ok) expect(result.value.card?.templateName).toBe('archive');
     expect(mockBitableFind).toHaveBeenCalledTimes(3);
+    expect(mockCardBuilderBuild).toHaveBeenCalledWith('archive', expect.objectContaining({
+      summary: expect.stringContaining('项目'),
+    }));
   });
 
   it('run: LLM failure returns err', async () => {
