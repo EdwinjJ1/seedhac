@@ -22,7 +22,6 @@ import type {
   CardInputMap,
   CardSource,
   CardTemplateName,
-  CrossChatCardInput,
   DocChangeCardInput,
   DocPushCardInput,
   OfflineSummaryCardInput,
@@ -424,7 +423,6 @@ const builders: { [K in CardTemplateName]: (input: CardInputMap[K]) => Card } = 
   docChange: buildDocChange,
   weekly: buildWeekly,
   recall: buildRecall,
-  crossChat: buildCrossChat,
 };
 
 export const larkCardBuilder: CardBuilder = {

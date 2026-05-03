@@ -4,7 +4,7 @@
  * Bitable 在我们这套架构里承担：Memory / 决策 / 待办 / 知识图谱（双向关联字段）的存储。
  * 限制（CLAUDE.md）：10 QPS、单批 ≤ 500 条、批量操作全成功或全失败。
  *
- * v0.1：行类型用宽松的 Record<string, unknown>，待 Bitable 表 schema 实建后收紧
+ * 行类型当前用宽松的 Record<string, unknown>，待 Bitable 表 schema 实建后收紧
  * （收紧不算"改契约"，算"补全"）。
  */
 

@@ -1,12 +1,12 @@
 /**
- * SeedHAC bot 入口（v0.1 联调脚手架）。
+ * Lark Loom bot 入口（联调脚手架）。
  *
- * 这一版只做 issue #13 的最后一步验收：
+ * 当前职责：
  *   - 读 .env 里的 4 个凭证
  *   - 启 WSClient 长连接
  *   - 收到群消息时把发送人 / 群 ID / 文本打到控制台
  *
- * BotRuntime / SkillRouter / 限流等真实运行时在后续 issue 实现。
+ * BotRuntime / SkillRouter / 限流等真实运行时在 issue #22 wiring 完成后接入。
  */
 
 import * as lark from '@larksuiteoapi/node-sdk';
@@ -109,7 +109,7 @@ function printSkillRoster(): void {
 }
 
 async function main(): Promise<void> {
-  console.info('[seedhac/bot] booting v0.1 (WSClient scaffold)');
+  console.info('[seedhac/bot] booting (WSClient scaffold)');
   printSkillRoster();
 
   const env = readEnv();

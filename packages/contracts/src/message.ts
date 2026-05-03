@@ -1,7 +1,7 @@
 /**
  * 飞书消息 + 事件抽象。
- * 飞书原始事件字段繁杂，这里只暴露我们用得到的最小集；
- * 写入实现时通过 lark-cli schema im.message.receive_v1 校对原始字段。
+ * 飞书原始事件字段繁杂，这里只暴露我们用得到的最小集。
+ * 原始字段以飞书开放平台 im.message.receive_v1 文档为准。
  */
 
 export type ChatType = 'group' | 'p2p';

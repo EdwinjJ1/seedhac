@@ -2,7 +2,7 @@
   "name": "@seedhac/contracts",
   "version": "0.1.0",
   "private": true,
-  "description": "SeedHAC 跨包接口契约 — 所有 interface / type / schema 的单一来源",
+  "description": "Lark Loom 跨包接口契约 — 所有 interface / type / schema 的单一来源",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
