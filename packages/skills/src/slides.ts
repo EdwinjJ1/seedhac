@@ -2,10 +2,9 @@
  * 🅳 slides — 幻灯片生成
  *
  * 触发：@bot 做 PPT / @bot 生成幻灯片
- * 数据流：群聊上下文 → LLM 出大纲 → 拼飞书 SML 2.0 XML → lark-cli slides +create
+ * 数据流：群聊上下文 → LLM 出大纲 → 飞书 docx-v1 API 创建 markdown 文档 → 用户一键转 PPT
  *
- * 飞书云文档"演示文稿"开放 API，bot tenant token 即可调用。
- * 页面 schema：<slide xmlns="http://www.larkoffice.com/sml/2.0"><data>...</data></slide>
+ * 通过 @larksuiteoapi/node-sdk 调用，bot tenant token 即可。
  */
 
 import type { Skill } from '@seedhac/contracts';

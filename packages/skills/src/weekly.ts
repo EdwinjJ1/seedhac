@@ -11,7 +11,7 @@ import { ErrorCode, err, makeError } from '@seedhac/contracts';
 export const weeklySkill: Skill = {
   name: 'weekly',
   trigger: {
-    events: ['message'], // 占位；真实实现走 scheduler 注入
+    events: [], // 不监听消息事件，由 runtime scheduler 按 cron 推 BotEvent
     requireMention: false,
     cron: '0 17 * * 5',
     description: '周五 17:00 → 扫本周消息生成周报卡片',
