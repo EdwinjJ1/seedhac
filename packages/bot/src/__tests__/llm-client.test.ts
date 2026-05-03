@@ -284,3 +284,225 @@ describe('VolcanoLLMClient', () => {
     expect(fetch).toHaveBeenCalledOnce();
   });
 });
+
+// ---------- chatWithTools ----------
+
+import type { LLMTool, ToolCall, ToolResult } from '@seedhac/contracts';
+
+const TOOLS: LLMTool[] = [
+  {
+    name: 'get_weather',
+    description: 'Get current weather for a city',
+    parameters: {
+      type: 'object',
+      properties: { city: { type: 'string' } },
+      required: ['city'],
+    },
+  },
+];
+
+/** 构造一个 Ark 风格的 tool_calls 响应 */
+function arkToolCallResponse(name: string, args: object, id = 'call_1'): object {
+  return {
+    choices: [
+      {
+        message: {
+          content: '',
+          tool_calls: [
+            { id, type: 'function', function: { name, arguments: JSON.stringify(args) } },
+          ],
+        },
+        finish_reason: 'tool_calls',
+      },
+    ],
+    usage: { prompt_tokens: 20, completion_tokens: 5 },
+  };
+}
+
+function arkTextResponse(content: string): object {
+  return {
+    choices: [{ message: { content }, finish_reason: 'stop' }],
+    usage: { prompt_tokens: 10, completion_tokens: 5 },
+  };
+}
+
+/** 让 fetch 按调用顺序依次返回不同 JSON */
+function mockFetchSequence(...responses: object[]): void {
+  const fn = vi.fn();
+  for (const r of responses) {
+    fn.mockResolvedValueOnce({
+      ok: true,
+      json: async () => r,
+      text: async () => JSON.stringify(r),
+    });
+  }
+  vi.stubGlobal('fetch', fn);
+}
+
+describe('VolcanoLLMClient.chatWithTools', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it('rejects when tools is empty', async () => {
+    const result = await makeClient().chatWithTools(
+      [{ role: 'user', content: 'hi' }],
+      { tools: [], executor: async () => ({ toolCallId: 'x', name: 'x', content: '{}' }) },
+    );
+    expect(result.ok).toBe(false);
+  });
+
+  it('runs single tool round and returns final content', async () => {
+    mockFetchSequence(
+      arkToolCallResponse('get_weather', { city: 'Beijing' }, 'c1'),
+      arkTextResponse('Beijing is 22°C, sunny.'),
+    );
+
+    const executor = vi.fn(
+      async (call: ToolCall): Promise<ToolResult> => ({
+        toolCallId: call.id,
+        name: call.name,
+        content: JSON.stringify({ temp: 22, sky: 'sunny' }),
+      }),
+    );
+
+    const result = await makeClient().chatWithTools(
+      [{ role: 'user', content: 'weather in Beijing?' }],
+      { tools: TOOLS, executor },
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.content).toBe('Beijing is 22°C, sunny.');
+      expect(result.value.toolCalls).toHaveLength(1);
+      expect(result.value.toolCalls[0]!.name).toBe('get_weather');
+      expect(result.value.rounds).toBe(2);
+    }
+    expect(executor).toHaveBeenCalledOnce();
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('passes tools and tool_choice in API request', async () => {
+    mockFetchOk('done');
+    await makeClient().chatWithTools(
+      [{ role: 'user', content: 'hi' }],
+      {
+        tools: TOOLS,
+        toolChoice: 'auto',
+        executor: async () => ({ toolCallId: 'x', name: 'x', content: '{}' }),
+      },
+    );
+    const body = JSON.parse((vi.mocked(fetch).mock.calls[0]![1] as RequestInit).body as string);
+    expect(body.tools).toHaveLength(1);
+    expect(body.tools[0]).toEqual({
+      type: 'function',
+      function: {
+        name: 'get_weather',
+        description: 'Get current weather for a city',
+        parameters: TOOLS[0]!.parameters,
+      },
+    });
+    expect(body.tool_choice).toBe('auto');
+  });
+
+  it('stops at maxToolCallRounds and returns last content', async () => {
+    // 模型一直要求调工具，永远不收敛
+    mockFetchSequence(
+      arkToolCallResponse('get_weather', { city: 'A' }, 'c1'),
+      arkToolCallResponse('get_weather', { city: 'B' }, 'c2'),
+      arkToolCallResponse('get_weather', { city: 'C' }, 'c3'),
+    );
+
+    const result = await makeClient().chatWithTools(
+      [{ role: 'user', content: 'go' }],
+      {
+        tools: TOOLS,
+        maxToolCallRounds: 3,
+        executor: async (call) => ({
+          toolCallId: call.id,
+          name: call.name,
+          content: '{}',
+        }),
+      },
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.rounds).toBe(3);
+      expect(result.value.toolCalls).toHaveLength(3);
+    }
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
+  it('isolates executor errors and feeds them back to model', async () => {
+    mockFetchSequence(
+      arkToolCallResponse('get_weather', { city: 'X' }, 'c1'),
+      arkTextResponse('Sorry, weather lookup failed.'),
+    );
+
+    const executor = vi.fn(async (): Promise<ToolResult> => {
+      throw new Error('upstream down');
+    });
+
+    const result = await makeClient().chatWithTools(
+      [{ role: 'user', content: 'weather?' }],
+      { tools: TOOLS, executor },
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.content).toBe('Sorry, weather lookup failed.');
+    }
+    // 第二次调用时 conversation 里应包含一条 role=tool 的错误结果
+    const secondBody = JSON.parse(
+      (vi.mocked(fetch).mock.calls[1]![1] as RequestInit).body as string,
+    );
+    const toolMsg = secondBody.messages.find((m: { role: string }) => m.role === 'tool');
+    expect(toolMsg).toBeDefined();
+    expect(toolMsg.content).toContain('upstream down');
+  });
+
+  it('handles multiple parallel tool_calls in one round', async () => {
+    mockFetchSequence(
+      {
+        choices: [
+          {
+            message: {
+              content: '',
+              tool_calls: [
+                { id: 'a', type: 'function', function: { name: 'get_weather', arguments: '{"city":"A"}' } },
+                { id: 'b', type: 'function', function: { name: 'get_weather', arguments: '{"city":"B"}' } },
+              ],
+            },
+            finish_reason: 'tool_calls',
+          },
+        ],
+        usage: { prompt_tokens: 20, completion_tokens: 5 },
+      },
+      arkTextResponse('Both done.'),
+    );
+
+    const executor = vi.fn(
+      async (call: ToolCall): Promise<ToolResult> => ({
+        toolCallId: call.id,
+        name: call.name,
+        content: JSON.stringify({ city: JSON.parse(call.argumentsRaw).city }),
+      }),
+    );
+
+    const result = await makeClient().chatWithTools(
+      [{ role: 'user', content: 'A and B?' }],
+      { tools: TOOLS, executor },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(executor).toHaveBeenCalledTimes(2);
+    if (result.ok) {
+      expect(result.value.toolCalls).toHaveLength(2);
+    }
+  });
+});
