@@ -16,13 +16,13 @@ import type { Message } from '@seedhac/contracts';
 
 /** Router 输出的意图类型（bot 包内部，不放 contracts） */
 export type RouteIntent =
-  | 'qa'               // 信息缺口回答 — @bot + 疑问句
-  | 'taskAssignment'   // 分工识别与表格生成 — 听到分工讨论
-  | 'progressUpdate'   // 阶段进展更新 — 听到进展汇报
-  | 'meetingNotes'     // 会议纪要读取 — 纪要进群
-  | 'slides'           // 演示文稿生成 — 听到 PPT 需求
-  | 'requirementDoc'   // 需求整理 — 听到项目需求/资料
-  | 'silent';          // 不处理
+  | 'qa' // 信息缺口回答 — @bot + 疑问句
+  | 'taskAssignment' // 分工识别与表格生成 — 听到分工讨论
+  | 'progressUpdate' // 阶段进展更新 — 听到进展汇报
+  | 'meetingNotes' // 会议纪要读取 — 纪要进群
+  | 'slides' // 演示文稿生成 — 听到 PPT 需求
+  | 'requirementDoc' // 需求整理 — 听到项目需求/资料
+  | 'silent'; // 不处理
 
 interface RouteRule {
   readonly intent: Exclude<RouteIntent, 'silent'>;
@@ -93,27 +93,14 @@ const RULES: readonly RouteRule[] = [
   {
     intent: 'meetingNotes',
     requireMention: false,
-    patterns: [
-      /会议纪要/,
-      /妙记/,
-      /会议总结/,
-      /本次会议/,
-      /会议结论/,
-    ],
+    patterns: [/会议纪要/, /妙记/, /会议总结/, /本次会议/, /会议结论/],
   },
 
   // ── slides：需要做 PPT 汇报（被动）──────────────────────────────
   {
     intent: 'slides',
     requireMention: false,
-    patterns: [
-      /ppt/i,
-      /幻灯片/,
-      /演示文稿/,
-      /向上级汇报/,
-      /给老板汇报/,
-      /做个演示/,
-    ],
+    patterns: [/ppt/i, /幻灯片/, /演示文稿/, /向上级汇报/, /给老板汇报/, /做个演示/],
   },
 
   // ── requirementDoc：项目需求/资料（被动，最宽泛放最后）──────────
