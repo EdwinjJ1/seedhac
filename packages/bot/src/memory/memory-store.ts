@@ -17,6 +17,7 @@
 import {
   type BitableClient,
   type LLMClient,
+  type Logger,
   type MemoryRecord,
   type MemoryKind,
   type MemoryWriteInput,
@@ -33,8 +34,16 @@ export const MEMORY_MAX_CONTENT_BYTES = 2 * 1024;
 export const MEMORY_MAX_PER_CHAT_KIND = 200;
 export const MEMORY_MAX_TOTAL = 2000;
 export const MEMORY_SCORE_FLUSH_MS = 30_000;
+export const MEMORY_MAX_QUERY_LENGTH = 64;
 const MEMORY_TABLE = 'memory' as const;
 const MEMORY_PENDING_SCORE = -1;
+
+/**
+ * 主键字段（kind/chat_id/key/user_id）允许的字符集：字母、数字、下划线、连字符、冒号、点。
+ * 这是这些字段的"应当形态"（飞书 open_id / 我们的内部 key 都在这个集合内）。
+ * 收紧这里 = 防止 Bitable filter 表达式注入 + 关闭跨 chat 越权读取面。
+ */
+const SAFE_KEY_PATTERN = /^[A-Za-z0-9_:.-]+$/;
 
 // ---------- 配置 ----------
 
@@ -46,6 +55,8 @@ export interface MemoryStoreConfig {
   readonly scoreFlushMs?: number;
   /** 当前时间提供者（测试用）*/
   readonly now?: () => number;
+  /** 可选：日志器；不注入则 fire-and-forget 失败完全静默（不推荐生产环境） */
+  readonly logger?: Logger;
 }
 
 // ---------- 评分队列 ----------
@@ -96,6 +107,7 @@ export function evictScore(
 export class MemoryStore {
   private readonly bitable: BitableClient;
   private readonly llm?: LLMClient;
+  private readonly logger?: Logger;
   private readonly scoreFlushMs: number;
   private readonly now: () => number;
   private scoreQueue: PendingScore[] = [];
@@ -104,8 +116,31 @@ export class MemoryStore {
   constructor(config: MemoryStoreConfig) {
     this.bitable = config.bitable;
     if (config.llm !== undefined) this.llm = config.llm;
+    if (config.logger !== undefined) this.logger = config.logger;
     this.scoreFlushMs = config.scoreFlushMs ?? MEMORY_SCORE_FLUSH_MS;
     this.now = config.now ?? Date.now;
+  }
+
+  /** 校验主键字段不含可注入 Bitable filter 的字符 */
+  private validateSafeKey(field: string, value: string): Result<true> {
+    if (!SAFE_KEY_PATTERN.test(value)) {
+      return err(
+        makeError(
+          ErrorCode.INVALID_INPUT,
+          `MemoryStore: ${field} contains illegal characters; allowed [A-Za-z0-9_:.-]+`,
+          undefined,
+          { field, value },
+        ),
+      );
+    }
+    return ok(true);
+  }
+
+  /** 把用户提供的 search query 收敛到安全字符 + 长度上限（不允许逃逸 filter 表达式） */
+  private sanitizeQuery(raw: string): string {
+    // 去掉控制字符 + 反斜杠 + 双引号；超过上限则截断
+    const cleaned = raw.replace(/[\x00-\x1f"\\]/g, ' ').trim();
+    return cleaned.slice(0, MEMORY_MAX_QUERY_LENGTH);
   }
 
   // ─────────────────────────── read ───────────────────────────
@@ -119,6 +154,11 @@ export class MemoryStore {
     chatId: string,
     key: string,
   ): Promise<Result<MemoryRecord | null>> {
+    const v1 = this.validateSafeKey('chat_id', chatId);
+    if (!v1.ok) return v1;
+    const v2 = this.validateSafeKey('key', key);
+    if (!v2.ok) return v2;
+
     const findResult = await this.bitable.find({
       table: MEMORY_TABLE,
       filter: this.buildFilter({ kind, chat_id: chatId, key }),
@@ -131,7 +171,12 @@ export class MemoryStore {
 
     const memory = this.rowToMemory(record);
     // fire-and-forget：刷新 last_access
-    void this.touchAccess(record.recordId).catch(() => {});
+    void this.touchAccess(record.recordId).catch((e) => {
+      this.logger?.warn('memory: touchAccess failed in read', {
+        recordId: record.recordId,
+        error: e instanceof Error ? e.message : String(e),
+      });
+    });
     return ok(memory);
   }
 
@@ -147,8 +192,17 @@ export class MemoryStore {
     query: string,
     opts: { limit?: number; kind?: MemoryKind } = {},
   ): Promise<Result<readonly MemoryRecord[]>> {
+    const v = this.validateSafeKey('chat_id', chatId);
+    if (!v.ok) return v;
+
+    const safeQuery = this.sanitizeQuery(query);
+    if (!safeQuery) {
+      // 全空 query 没意义；返回空列表而非全表扫描
+      return ok([]);
+    }
+
     const limit = Math.min(Math.max(opts.limit ?? 10, 1), 50);
-    const filter = this.buildSearchFilter(chatId, query, opts.kind);
+    const filter = this.buildSearchFilter(chatId, safeQuery, opts.kind);
 
     const findResult = await this.bitable.find({
       table: MEMORY_TABLE,
@@ -160,7 +214,14 @@ export class MemoryStore {
     const memories = findResult.value.records.map((r) => this.rowToMemory(r));
     // 批量刷新 last_access
     void Promise.all(
-      findResult.value.records.map((r) => this.touchAccess(r.recordId).catch(() => {})),
+      findResult.value.records.map((r) =>
+        this.touchAccess(r.recordId).catch((e) => {
+          this.logger?.warn('memory: touchAccess failed in search', {
+            recordId: r.recordId,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }),
+      ),
     );
     return ok(memories);
   }
@@ -175,6 +236,15 @@ export class MemoryStore {
    *   4. 写入后异步检查容量，超限触发淘汰
    */
   async write(input: MemoryWriteInput): Promise<Result<MemoryRecord>> {
+    const v1 = this.validateSafeKey('chat_id', input.chat_id);
+    if (!v1.ok) return v1;
+    const v2 = this.validateSafeKey('key', input.key);
+    if (!v2.ok) return v2;
+    if (input.user_id !== undefined) {
+      const v3 = this.validateSafeKey('user_id', input.user_id);
+      if (!v3.ok) return v3;
+    }
+
     const now = this.now();
     const content = truncateBytes(input.content, MEMORY_MAX_CONTENT_BYTES);
 
@@ -238,7 +308,13 @@ export class MemoryStore {
     }
 
     // 容量护栏（异步 fire-and-forget）
-    void this.enforceCapacity(input.kind, input.chat_id).catch(() => {});
+    void this.enforceCapacity(input.kind, input.chat_id).catch((e) => {
+      this.logger?.warn('memory: enforceCapacity failed', {
+        kind: input.kind,
+        chat_id: input.chat_id,
+        error: e instanceof Error ? e.message : String(e),
+      });
+    });
 
     return ok(record);
   }
@@ -257,7 +333,9 @@ export class MemoryStore {
     const schema = {
       parse: (v: unknown): { importance: number } => {
         const obj = v as { importance?: unknown };
-        if (typeof obj.importance !== 'number') throw new Error('importance not a number');
+        if (typeof obj.importance !== 'number' || !Number.isFinite(obj.importance)) {
+          throw new Error('importance not a finite number');
+        }
         const n = Math.max(0, Math.min(10, Math.round(obj.importance)));
         return { importance: n };
       },
@@ -292,14 +370,26 @@ export class MemoryStore {
     this.scoreQueue = [];
     for (const item of queue) {
       const scoreResult = await this.score(item.content);
-      if (!scoreResult.ok) continue;
-      await this.bitable
-        .update({
+      if (!scoreResult.ok) {
+        this.logger?.warn('memory: score failed', {
+          recordId: item.recordId,
+          code: scoreResult.error.code,
+          message: scoreResult.error.message,
+        });
+        continue;
+      }
+      try {
+        await this.bitable.update({
           table: MEMORY_TABLE,
           recordId: item.recordId,
           patch: { importance: scoreResult.value },
-        })
-        .catch(() => {});
+        });
+      } catch (e) {
+        this.logger?.warn('memory: write back importance failed', {
+          recordId: item.recordId,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
     }
   }
 
@@ -350,9 +440,14 @@ export class MemoryStore {
     const toDelete = sorted.slice(0, n);
     for (const m of toDelete) {
       if (!m.id) continue;
-      await this.bitable
-        .delete({ table: MEMORY_TABLE, recordId: m.id })
-        .catch(() => {});
+      try {
+        await this.bitable.delete({ table: MEMORY_TABLE, recordId: m.id });
+      } catch (e) {
+        this.logger?.warn('memory: evict delete failed', {
+          recordId: m.id,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
     }
   }
 
