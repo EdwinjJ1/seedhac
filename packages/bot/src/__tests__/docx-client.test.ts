@@ -14,15 +14,15 @@ describe('LarkDocxClient', () => {
           document: {
             create: vi.fn(),
           },
-          documentBlock: {
-            batchUpdate: vi.fn(),
+          documentBlockChildren: {
+            create: vi.fn(),
           },
         },
       },
       drive: {
         v1: {
-          file: {
-            createShareLink: vi.fn(),
+          permissionPublic: {
+            patch: vi.fn(),
           },
         },
       },
@@ -66,7 +66,7 @@ describe('LarkDocxClient', () => {
 
   describe('appendBlocks()', () => {
     it('should correctly transform and pass block JSON', async () => {
-      (client.docx.v1.documentBlock as any).batchUpdate.mockResolvedValueOnce({
+      (client.docx.v1.documentBlockChildren as any).create.mockResolvedValueOnce({
         code: 0,
         msg: 'success',
       });
@@ -79,17 +79,15 @@ describe('LarkDocxClient', () => {
       ]);
 
       expect(result.ok).toBe(true);
-      expect((client.docx.v1.documentBlock as any).batchUpdate).toHaveBeenCalledWith(
+      expect((client.docx.v1.documentBlockChildren as any).create).toHaveBeenCalledWith(
         expect.objectContaining({
           path: { document_id: 'doc-token-123', block_id: 'doc-token-123' },
           data: {
-            requests: [
-              {
-                insert_blocks_request: {
-                  payload: `[{"block_type":2,"heading1":{"elements":[{"text_run":{"content":"H1"}}]}},{"block_type":3,"heading2":{"elements":[{"text_run":{"content":"H2"}}]}},{"block_type":1,"text":{"elements":[{"text_run":{"content":"Para"}}]}},{"block_type":12,"bullet":{"elements":[{"text_run":{"content":"Bul"}}]}}]`,
-                  payload_document_revision_id: -1,
-                },
-              },
+            children: [
+              { block_type: 3, heading1: { elements: [{ text_run: { content: 'H1' } }] } },
+              { block_type: 4, heading2: { elements: [{ text_run: { content: 'H2' } }] } },
+              { block_type: 2, text: { elements: [{ text_run: { content: 'Para' } }] } },
+              { block_type: 12, bullet: { elements: [{ text_run: { content: 'Bul' } }] } },
             ],
           },
         }),
@@ -99,18 +97,15 @@ describe('LarkDocxClient', () => {
 
   describe('getShareLink()', () => {
     it('should return URL string when successful', async () => {
-      (client.drive.v1.file as any).createShareLink.mockResolvedValueOnce({
+      (client.drive.v1.permissionPublic as any).patch.mockResolvedValueOnce({
         code: 0,
         msg: 'success',
-        data: {
-          share_link: { share_url: 'https://feishu.cn/docx/link' },
-        },
       });
 
       const result = await docxClient.getShareLink('doc-token-123');
       expect(result.ok).toBe(true);
       if (result.ok) {
-        expect(result.value).toBe('https://feishu.cn/docx/link');
+        expect(result.value).toBe('https://feishu.cn/docx/doc-token-123');
       }
     });
   });
@@ -122,7 +117,7 @@ describe('LarkDocxClient', () => {
         msg: 'success',
         data: { document: { document_id: 'doc-token-123' } },
       });
-      (client.docx.v1.documentBlock as any).batchUpdate.mockResolvedValueOnce({
+      (client.docx.v1.documentBlockChildren as any).create.mockResolvedValueOnce({
         code: 0,
         msg: 'success',
       });
@@ -138,17 +133,13 @@ A normal paragraph.
       const result = await docxClient.createFromMarkdown('MD Title', markdown);
       expect(result.ok).toBe(true);
 
-      // Verify appendBlocks transformation
-      const batchUpdateCall = (client.docx.v1.documentBlock as any).batchUpdate.mock.calls[0][0];
-      const payloadString = batchUpdateCall.data.requests[0].insert_blocks_request.payload;
-      const payload = JSON.parse(payloadString);
-
-      expect(payload).toEqual([
-        { block_type: 2, heading1: { elements: [{ text_run: { content: 'H1 Title' } }] } },
-        { block_type: 3, heading2: { elements: [{ text_run: { content: 'H2 Subtitle' } }] } },
+      const createCall = (client.docx.v1.documentBlockChildren as any).create.mock.calls[0][0];
+      expect(createCall.data.children).toEqual([
+        { block_type: 3, heading1: { elements: [{ text_run: { content: 'H1 Title' } }] } },
+        { block_type: 4, heading2: { elements: [{ text_run: { content: 'H2 Subtitle' } }] } },
         { block_type: 12, bullet: { elements: [{ text_run: { content: 'Bullet 1' } }] } },
         { block_type: 12, bullet: { elements: [{ text_run: { content: 'Bullet 2' } }] } },
-        { block_type: 1, text: { elements: [{ text_run: { content: 'A normal paragraph.' } }] } },
+        { block_type: 2, text: { elements: [{ text_run: { content: 'A normal paragraph.' } }] } },
       ]);
     });
 
@@ -160,7 +151,7 @@ A normal paragraph.
 
       const result = await docxClient.createFromMarkdown('MD Title', '# H1');
       expect(result.ok).toBe(false);
-      expect((client.docx.v1.documentBlock as any).batchUpdate).not.toHaveBeenCalled();
+      expect((client.docx.v1.documentBlockChildren as any).create).not.toHaveBeenCalled();
     });
   });
 });
