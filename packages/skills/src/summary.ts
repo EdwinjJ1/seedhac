@@ -106,21 +106,20 @@ export const summarySkill: Skill = {
     });
     if (!memRes.ok) ctx.logger.warn('summary: insert memory failed', { error: memRes.error });
 
+    const card = ctx.cardBuilder.build('summary', {
+      title: '会议纪要',
+      topics: [],
+      decisions: summary.decisions,
+      todos: summary.actionItems.map((a) => ({
+        text: a.content,
+        assignee: a.owner,
+        ...(a.ddl !== undefined ? { due: a.ddl } : {}),
+      })),
+      followUps: [...summary.issues, ...summary.nextSteps],
+    });
+
     return ok({
-      card: {
-        templateName: 'summary',
-        content: {
-          title: '会议纪要',
-          topics: [],
-          decisions: summary.decisions,
-          todos: summary.actionItems.map((a) => ({
-            text: a.content,
-            assignee: a.owner,
-            due: a.ddl,
-          })),
-          followUps: [...summary.issues, ...summary.nextSteps],
-        },
-      },
+      card,
       reasoning: `提取到 ${summary.decisions.length} 条决策，${summary.actionItems.length} 条行动项`,
     });
   },

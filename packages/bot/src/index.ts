@@ -1,7 +1,10 @@
+import * as lark from '@larksuiteoapi/node-sdk';
 import type { Logger, SkillContext } from '@seedhac/contracts';
 import { skillsByName } from '@seedhac/skills';
 import { createBotRuntime } from './bot-runtime.js';
 import { LarkBitableClient } from './bitable-client.js';
+import { larkCardBuilder } from './card-builder.js';
+import { LarkDocxClient } from './docx-client.js';
 import { VolcanoLLMClient } from './llm-client.js';
 import { SkillRouter } from './skill-router.js';
 import { handleEvent } from './wiring.js';
@@ -42,13 +45,16 @@ function buildDeps() {
     },
   });
 
-  return { runtime, router, llm, bitable };
+  const larkClient = new lark.Client({ appId, appSecret });
+  const docx = new LarkDocxClient(larkClient);
+
+  return { runtime, router, llm, bitable, docx };
 }
 
 async function main(): Promise<void> {
   logger.info('booting');
 
-  const { runtime, router, llm, bitable } = buildDeps();
+  const { runtime, router, llm, bitable, docx } = buildDeps();
 
   runtime.on(async (event) => {
     if (event.type === 'message') {
@@ -62,6 +68,8 @@ async function main(): Promise<void> {
       runtime,
       llm,
       bitable,
+      docx,
+      cardBuilder: larkCardBuilder,
       retrievers: {},
       logger,
     };

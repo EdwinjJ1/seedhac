@@ -6,6 +6,7 @@ const mockLLMAsk = vi.fn();
 const mockFetchHistory = vi.fn();
 const mockBitableBatchInsert = vi.fn();
 const mockBitableInsert = vi.fn();
+const mockCardBuilderBuild = vi.fn().mockReturnValue({ templateName: 'summary', content: { built: true } });
 
 function makeMessage(text: string): Message {
   return {
@@ -31,6 +32,8 @@ function makeCtx(event: BotEvent): SkillContext {
     runtime: { fetchHistory: mockFetchHistory, sendText: vi.fn(), sendCard: vi.fn(), patchCard: vi.fn(), on: vi.fn(), start: vi.fn(), stop: vi.fn() },
     llm: { ask: mockLLMAsk, chat: vi.fn(), askStructured: vi.fn() },
     bitable: { find: vi.fn(), insert: mockBitableInsert, batchInsert: mockBitableBatchInsert, update: vi.fn(), delete: vi.fn(), link: vi.fn() },
+    docx: {} as SkillContext['docx'],
+    cardBuilder: { build: mockCardBuilderBuild },
     retrievers: {},
     logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
   } as unknown as SkillContext;
@@ -72,11 +75,11 @@ describe('summarySkill', () => {
     const result = await summarySkill.run(makeCtx(makeEvent('本次会议总结')));
 
     expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.value.card?.templateName).toBe('summary');
-      expect(result.value.card?.content['decisions']).toEqual(['采用方案A', '预算定为 10 万']);
-    }
+    if (result.ok) expect(result.value.card?.templateName).toBe('summary');
     expect(mockBitableBatchInsert).toHaveBeenCalledTimes(2); // decision + todo
+    expect(mockCardBuilderBuild).toHaveBeenCalledWith('summary', expect.objectContaining({
+      decisions: ['采用方案A', '预算定为 10 万'],
+    }));
   });
 
   it('run: LLM failure returns err, batchInsert not called', async () => {
@@ -118,9 +121,10 @@ describe('summarySkill', () => {
     const result = await summarySkill.run(makeCtx(makeEvent('会议纪要')));
 
     expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.value.card?.content['decisions']).toEqual([]);
-    }
+    if (result.ok) expect(result.value.card?.templateName).toBe('summary');
     expect(mockBitableBatchInsert).not.toHaveBeenCalled(); // empty arrays → no batchInsert
+    expect(mockCardBuilderBuild).toHaveBeenCalledWith('summary', expect.objectContaining({
+      decisions: [],
+    }));
   });
 });
