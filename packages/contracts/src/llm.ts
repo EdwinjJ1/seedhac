@@ -56,7 +56,11 @@ export interface AskOptions {
   readonly timeoutMs?: number;
   /** 可选：声明模型可调用的工具列表（function calling） */
   readonly tools?: readonly LLMTool[];
-  /** 可选：'auto'（默认）/ 'none' / 具体工具名 */
+  /**
+   * 可选：'auto'（默认，模型自决）/ 'none'（强制不调工具）/ 具体工具名（强制调指定工具）。
+   * 注：联合中的 string 表达"具体工具名"，类型层面无法收窄字面量；
+   * 实现按 OpenAI 协议透传，string 视为工具名。
+   */
   readonly toolChoice?: 'auto' | 'none' | string;
 }
 

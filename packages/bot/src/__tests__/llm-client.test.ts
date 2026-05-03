@@ -505,4 +505,211 @@ describe('VolcanoLLMClient.chatWithTools', () => {
       expect(result.value.toolCalls).toHaveLength(2);
     }
   });
+
+  // H1: assistant 同时返回 content + tool_calls 时，content 必须保留进对话历史
+  it('preserves non-empty assistant content alongside tool_calls (H1)', async () => {
+    mockFetchSequence(
+      {
+        choices: [
+          {
+            message: {
+              content: '我先查一下天气',
+              tool_calls: [
+                { id: 'c1', type: 'function', function: { name: 'get_weather', arguments: '{"city":"X"}' } },
+              ],
+            },
+            finish_reason: 'tool_calls',
+          },
+        ],
+        usage: { prompt_tokens: 20, completion_tokens: 5 },
+      },
+      arkTextResponse('天气晴朗'),
+    );
+
+    await makeClient().chatWithTools(
+      [{ role: 'user', content: 'weather?' }],
+      {
+        tools: TOOLS,
+        executor: async (call) => ({
+          toolCallId: call.id,
+          name: call.name,
+          content: '{}',
+        }),
+      },
+    );
+
+    // 第二次请求里应保留第一轮的 assistant.content（不是空字符串被吞掉）
+    const secondBody = JSON.parse(
+      (vi.mocked(fetch).mock.calls[1]![1] as RequestInit).body as string,
+    );
+    const assistantMsg = secondBody.messages.find(
+      (m: { role: string; tool_calls?: unknown }) => m.role === 'assistant' && m.tool_calls,
+    );
+    expect(assistantMsg).toBeDefined();
+    expect(assistantMsg.content).toBe('我先查一下天气');
+  });
+
+  // H1 反向：assistant 只调工具不说话时 content 字段应被省略而非空串
+  it('omits content field when assistant only calls tools (H1)', async () => {
+    mockFetchSequence(
+      arkToolCallResponse('get_weather', { city: 'Y' }, 'c1'),
+      arkTextResponse('done'),
+    );
+
+    await makeClient().chatWithTools(
+      [{ role: 'user', content: 'go' }],
+      {
+        tools: TOOLS,
+        executor: async (call) => ({
+          toolCallId: call.id,
+          name: call.name,
+          content: '{}',
+        }),
+      },
+    );
+
+    const secondBody = JSON.parse(
+      (vi.mocked(fetch).mock.calls[1]![1] as RequestInit).body as string,
+    );
+    const assistantMsg = secondBody.messages.find(
+      (m: { role: string; tool_calls?: unknown }) => m.role === 'assistant' && m.tool_calls,
+    );
+    expect(assistantMsg).toBeDefined();
+    expect('content' in assistantMsg).toBe(false);
+  });
+
+  // L1: 模型返回的 arguments 是非法 JSON 时，executor 抛错应被隔离
+  it('isolates executor errors caused by malformed arguments JSON (L1)', async () => {
+    mockFetchSequence(
+      {
+        choices: [
+          {
+            message: {
+              content: '',
+              tool_calls: [
+                { id: 'c1', type: 'function', function: { name: 'get_weather', arguments: '{not valid json' } },
+              ],
+            },
+            finish_reason: 'tool_calls',
+          },
+        ],
+        usage: { prompt_tokens: 20, completion_tokens: 5 },
+      },
+      arkTextResponse('参数无效，已重试'),
+    );
+
+    const executor = vi.fn(async (call: ToolCall): Promise<ToolResult> => {
+      // 调用方按合约自行 parse — 故意暴露错误
+      JSON.parse(call.argumentsRaw);
+      return { toolCallId: call.id, name: call.name, content: '{}' };
+    });
+
+    const result = await makeClient().chatWithTools(
+      [{ role: 'user', content: 'go' }],
+      { tools: TOOLS, executor },
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.content).toBe('参数无效，已重试');
+    }
+    // executor 抛错被包成 ToolResult，第二次请求里能看到 role=tool 的错误结果
+    const secondBody = JSON.parse(
+      (vi.mocked(fetch).mock.calls[1]![1] as RequestInit).body as string,
+    );
+    const toolMsg = secondBody.messages.find((m: { role: string }) => m.role === 'tool');
+    expect(toolMsg.content).toMatch(/error|Unexpected/i);
+  });
+});
+
+// ---------- M4: retry path × tool round 串联 ----------
+
+describe('VolcanoLLMClient retry × tool round interaction', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  // 第 1 轮 fetch 失败一次后重试成功 → 第 2 轮（tool 回灌后）正常完成
+  it('chatWithTools recovers when callApi retries inside a tool round (M4)', async () => {
+    let callCount = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async () => {
+        callCount++;
+        // 第 1 次：transient 失败；第 2 次：tool_call 响应；第 3 次：最终文本
+        if (callCount === 1) throw new Error('transient network');
+        if (callCount === 2) {
+          return {
+            ok: true,
+            json: async () => arkToolCallResponse('get_weather', { city: 'Z' }, 'c1'),
+            text: async () => '',
+          };
+        }
+        return {
+          ok: true,
+          json: async () => arkTextResponse('recovered + answered'),
+          text: async () => '',
+        };
+      }),
+    );
+
+    const promise = makeClient().chatWithTools(
+      [{ role: 'user', content: 'weather?' }],
+      {
+        tools: TOOLS,
+        executor: async (call) => ({
+          toolCallId: call.id,
+          name: call.name,
+          content: '{"ok":true}',
+        }),
+      },
+    );
+    await vi.runAllTimersAsync();
+    const result = await promise;
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.content).toBe('recovered + answered');
+      expect(result.value.rounds).toBe(2);
+    }
+    expect(callCount).toBe(3); // 1 retry + 1 tool round + 1 final
+  }, 10_000);
+
+  // H2: 跨 attempt 出现过 timeout 但最后一次是 HTTP 500 → 应返回 LLM_TIMEOUT 而非掩盖
+  it('returns LLM_TIMEOUT when AbortError occurred at any attempt (H2)', async () => {
+    let callCount = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
+        callCount++;
+        if (callCount <= 2) {
+          // 模拟 timeout：listen abort signal 抛 AbortError
+          await new Promise<void>((_resolve, reject) => {
+            init.signal?.addEventListener('abort', () => {
+              const e = new Error('aborted');
+              e.name = 'AbortError';
+              reject(e);
+            });
+            // 永远不 resolve，让 timeout 触发 abort
+          });
+          return undefined;
+        }
+        // 第 3 次返 HTTP 500
+        return { ok: false, status: 500, text: async () => 'oops' };
+      }),
+    );
+
+    const promise = makeClient().ask('hi', { timeoutMs: 50 });
+    await vi.runAllTimersAsync();
+    const result = await promise;
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe(ErrorCode.LLM_TIMEOUT);
+    }
+  }, 10_000);
 });

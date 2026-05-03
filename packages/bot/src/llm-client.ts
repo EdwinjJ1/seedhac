@@ -47,7 +47,8 @@ interface ArkToolCallWire {
 
 interface ArkMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
-  content: string;
+  /** assistant + tool_calls 时可省略，让严格 provider 接受 null/缺失语义 */
+  content?: string;
   tool_calls?: ArkToolCallWire[];
   tool_call_id?: string;
   name?: string;
@@ -94,9 +95,19 @@ function stripCodeFence(raw: string): string {
 }
 
 function toArkMessage(m: ChatMessage): ArkMessage {
-  const base: ArkMessage = { role: m.role, content: m.content };
-  if (m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0) {
-    base.tool_calls = m.toolCalls.map((tc) => ({
+  // H1/L2: 当 assistant 消息只调工具不说话时，content === ''。
+  // OpenAI / Claude 等严格 provider 期望 content === null（Ark 容忍空串）。
+  // 这里对 assistant 做特殊处理：有 toolCalls + content 为空 → 省略 content；
+  // 其他场景保持 content 字段，避免破坏现有调用。
+  const hasToolCalls = m.role === 'assistant' && !!m.toolCalls && m.toolCalls.length > 0;
+  const omitContent = hasToolCalls && m.content === '';
+
+  const base: ArkMessage = omitContent
+    ? ({ role: m.role } as ArkMessage)
+    : { role: m.role, content: m.content };
+
+  if (hasToolCalls) {
+    base.tool_calls = m.toolCalls!.map((tc) => ({
       id: tc.id,
       type: 'function',
       function: { name: tc.name, arguments: tc.argumentsRaw },
@@ -165,6 +176,9 @@ export class VolcanoLLMClient implements LLMClient {
     });
 
     let lastErr: unknown;
+    // H2: 跨 attempt 跟踪是否出现过 AbortError，否则最后一次非 timeout 错误会
+    // 把"前面其实是 timeout"的信息掩盖成 LLM_INVALID_RESPONSE，影响调用方降级策略
+    let sawTimeout = false;
 
     for (let attempt = 0; attempt < 3; attempt++) {
       const startMs = Date.now();
@@ -212,16 +226,16 @@ export class VolcanoLLMClient implements LLMClient {
       } catch (e) {
         clearTimeout(timer);
         lastErr = e;
+        if (e instanceof Error && e.name === 'AbortError') sawTimeout = true;
         if (attempt < 2) await sleep(RETRY_DELAYS_MS[attempt] ?? 1000);
       }
     }
 
-    const isTimeout = lastErr instanceof Error && lastErr.name === 'AbortError';
     return err(
       makeError(
-        isTimeout ? ErrorCode.LLM_TIMEOUT : ErrorCode.LLM_INVALID_RESPONSE,
-        isTimeout
-          ? 'LLM request timed out after 3 attempts'
+        sawTimeout ? ErrorCode.LLM_TIMEOUT : ErrorCode.LLM_INVALID_RESPONSE,
+        sawTimeout
+          ? 'LLM request timed out (at least once) across 3 attempts'
           : 'LLM request failed after 3 attempts',
         lastErr,
       ),
@@ -281,16 +295,19 @@ export class VolcanoLLMClient implements LLMClient {
       }
 
       // 记录 + 把 assistant(toolCalls) 追加到对话历史
+      // H1: 同时返回 content + tool_calls 的情况（"我先查一下天气" + tool_call），
+      // 仅在 content 非空时回填，避免空串混入对话历史
       allToolCalls.push(...toolCalls);
-      conversation.push({
+      const assistantMsg: ArkMessage = {
         role: 'assistant',
-        content,
+        ...(content && { content }),
         tool_calls: toolCalls.map((tc) => ({
           id: tc.id,
           type: 'function',
           function: { name: tc.name, arguments: tc.argumentsRaw },
         })),
-      });
+      };
+      conversation.push(assistantMsg);
 
       // 串行执行 tool（避免 BitableClient QPS 风暴），错误隔离到单条 ToolResult
       for (const call of toolCalls) {
