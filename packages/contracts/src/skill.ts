@@ -17,14 +17,13 @@ import type { BotEvent } from './message.js';
 import type { Retriever } from './retriever.js';
 import type { Result } from './result.js';
 
-/** 9 条主线对应的稳定字符串 ID */
+/** 8 条主线对应的稳定字符串 ID */
 export type SkillName =
   | 'qa'
   | 'recall'
   | 'summary'
   | 'slides'
   | 'archive'
-  | 'crossChat'
   | 'weekly'
   | 'requirementDoc'  // 被动监听需求描述 → 生成结构化飞书文档
   | 'docIterate';     // 持续监听对话 → 增量更新已有需求文档
