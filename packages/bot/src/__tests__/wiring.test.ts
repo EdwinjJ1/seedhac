@@ -46,6 +46,7 @@ function makeCtx(event: BotEvent, runtimeOverride?: BotRuntime): SkillContext {
     runtime: runtimeOverride ?? makeRuntime(),
     llm: {} as SkillContext['llm'],
     bitable: {} as SkillContext['bitable'],
+    docx: {} as SkillContext['docx'],
     retrievers: {},
     logger: {
       debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(),
