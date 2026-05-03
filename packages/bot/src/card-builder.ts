@@ -22,7 +22,6 @@ import type {
   CardInputMap,
   CardSource,
   CardTemplateName,
-  CrossChatCardInput,
   DocChangeCardInput,
   DocPushCardInput,
   OfflineSummaryCardInput,
@@ -92,17 +91,28 @@ function btn(
 function renderSources(sources: readonly CardSource[]): string {
   if (sources.length === 0) return '';
   const kindMap: Record<CardSource['kind'], string> = {
-    wiki: '📄 Wiki', bitable: '📊 表格', chat: '💬 群聊',
-    minutes: '🎙 妙记', web: '🌐 网页', other: '📎 其他',
+    wiki: '📄 Wiki',
+    bitable: '📊 表格',
+    chat: '💬 群聊',
+    minutes: '🎙 妙记',
+    web: '🌐 网页',
+    other: '📎 其他',
   };
   return `**来源**\n${sources
-    .map((s) => `- ${kindMap[s.kind]} ${s.url ? `[${s.title}](${s.url})` : s.title}${s.snippet ? `：${s.snippet}` : ''}`)
+    .map(
+      (s) =>
+        `- ${kindMap[s.kind]} ${s.url ? `[${s.title}](${s.url})` : s.title}${s.snippet ? `：${s.snippet}` : ''}`,
+    )
     .join('\n')}`;
 }
 
 function renderButtons(btns: readonly CardButton[]): ButtonElement[] {
   return btns.map((b) =>
-    btn(b.text, b.value, b.variant === 'primary' ? 'primary' : b.variant === 'danger' ? 'danger' : 'default'),
+    btn(
+      b.text,
+      b.value,
+      b.variant === 'primary' ? 'primary' : b.variant === 'danger' ? 'danger' : 'default',
+    ),
   );
 }
 
@@ -139,11 +149,15 @@ function buildActivation(input: ActivationCardInput): Card {
  */
 function buildDocPush(input: DocPushCardInput): Card {
   const typeLabel: Record<DocPushCardInput['docType'], string> = {
-    requirement: '📋 需求文档', report: '📊 汇报材料',
-    minutes: '🗒 会议纪要', other: '📄 文档',
+    requirement: '📋 需求文档',
+    report: '📊 汇报材料',
+    minutes: '🗒 会议纪要',
+    other: '📄 文档',
   };
   const elements: BodyElement[] = [
-    md(`${typeLabel[input.docType]} **${input.docTitle}** 已生成${input.summary ? `\n\n${input.summary}` : ''}`),
+    md(
+      `${typeLabel[input.docType]} **${input.docTitle}** 已生成${input.summary ? `\n\n${input.summary}` : ''}`,
+    ),
     hr(),
     btn('打开文档', { action: 'open_url', url: input.docUrl }, 'primary'),
     md('_仅群内成员可查看与编辑_'),
@@ -233,10 +247,7 @@ function buildSummary(input: SummaryCardInput): Card {
  * UI：页数 + 每页标题 + bullet 预览，唯一主按钮
  */
 function buildSlides(input: SlidesCardInput): Card {
-  const elements: BodyElement[] = [
-    md(`**${input.title}**\n共 ${input.pageCount} 页`),
-    hr(),
-  ];
+  const elements: BodyElement[] = [md(`**${input.title}**\n共 ${input.pageCount} 页`), hr()];
   if (input.preview?.length) {
     const previewMd = input.preview
       .map((p, i) => `## ${i + 1}. ${p.title}\n${p.bullets.map((b) => `  - ${b}`).join('\n')}`)
@@ -279,9 +290,18 @@ function buildArchive(input: ArchiveCardInput): Card {
  * UI：离线时段 + 重要事项列表，轻量不打扰
  */
 function buildOfflineSummary(input: OfflineSummaryCardInput): Card {
-  const from = new Date(input.offlineFrom).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-  const to = new Date(input.offlineTo).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-  const highlights = input.highlights.slice(0, 5).map((h, i) => `${i + 1}. ${h}`).join('\n');
+  const from = new Date(input.offlineFrom).toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  const to = new Date(input.offlineTo).toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  const highlights = input.highlights
+    .slice(0, 5)
+    .map((h, i) => `${i + 1}. ${h}`)
+    .join('\n');
   return card('offlineSummary', {
     schema: '2.0',
     header: { title: pt('你离开期间发生了这些'), template: 'grey' },
@@ -309,7 +329,9 @@ function buildDocChange(input: DocChangeCardInput): Card {
     header: { title: pt('文档已更新'), template: 'carmine' },
     body: {
       elements: [
-        md(`**${input.editorName}** 更新了 **${input.docTitle}**\n\n${input.changeSummary}${affectedLine}`),
+        md(
+          `**${input.editorName}** 更新了 **${input.docTitle}**\n\n${input.changeSummary}${affectedLine}`,
+        ),
         hr(),
         btn('查看文档', { action: 'open_url', url: input.docUrl }, 'primary'),
       ],
@@ -331,7 +353,9 @@ function buildWeekly(input: WeeklyCardInput): Card {
   if (input.todos.length)
     elements.push(hr(), md(`**🔲 下周待办**\n${input.todos.map((t) => `- ${t}`).join('\n')}`));
   if (input.metrics && Object.keys(input.metrics).length) {
-    const metricLines = Object.entries(input.metrics).map(([k, v]) => `- ${k}：${v}`).join('\n');
+    const metricLines = Object.entries(input.metrics)
+      .map(([k, v]) => `- ${k}：${v}`)
+      .join('\n');
     elements.push(hr(), md(`**📊 关键指标**\n${metricLines}`));
   }
   return card('weekly', {
@@ -360,25 +384,6 @@ function buildRecall(input: RecallCardInput): Card {
   });
 }
 
-function buildCrossChat(input: CrossChatCardInput): Card {
-  const elements: BodyElement[] = [md(`**跨群搜索**\n"${input.query}"`), hr()];
-  if (!input.hits.length) {
-    elements.push(md('未找到相关记录。'));
-  } else {
-    elements.push(
-      md(input.hits.map((h) => {
-        const time = new Date(h.timestamp).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
-        return `**${h.chatName}** · ${time}\n> ${h.snippet}`;
-      }).join('\n\n')),
-    );
-  }
-  return card('crossChat', {
-    schema: '2.0',
-    header: { title: pt('跨群信息检索'), template: 'violet' },
-    body: { elements },
-  });
-}
-
 // ─── CardBuilder 实现 ─────────────────────────────────────────────────────────
 
 const builders: { [K in CardTemplateName]: (input: CardInputMap[K]) => Card } = {
@@ -393,7 +398,6 @@ const builders: { [K in CardTemplateName]: (input: CardInputMap[K]) => Card } = 
   docChange: buildDocChange,
   weekly: buildWeekly,
   recall: buildRecall,
-  crossChat: buildCrossChat,
 };
 
 export const larkCardBuilder: CardBuilder = {

@@ -1,5 +1,5 @@
 /**
- * Skill 抽象 — 7 条业务主线（qa / recall / summary / slides / archive / crossChat / weekly）
+ * Skill 抽象 — 9 条业务主线（qa / recall / summary / slides / archive / crossChat / weekly / requirementDoc / docIterate）
  * 各实现一个 Skill。
  *
  * Router 流程：
@@ -16,9 +16,18 @@ import type { LLMClient } from './llm.js';
 import type { BotEvent } from './message.js';
 import type { Retriever } from './retriever.js';
 import type { Result } from './result.js';
+import type { DocxClient } from './docx.js';
 
-/** 7 条主线对应的稳定字符串 ID */
-export type SkillName = 'qa' | 'recall' | 'summary' | 'slides' | 'archive' | 'crossChat' | 'weekly';
+/** 8 条主线对应的稳定字符串 ID */
+export type SkillName =
+  | 'qa'
+  | 'recall'
+  | 'summary'
+  | 'slides'
+  | 'archive'
+  | 'weekly'
+  | 'requirementDoc'  // 被动监听需求描述 → 生成结构化飞书文档
+  | 'docIterate';     // 持续监听对话 → 增量更新已有需求文档
 
 /** 触发条件描述（声明式，便于在 docs / debug UI 上展示） */
 export interface TriggerSpec {
@@ -51,6 +60,7 @@ export interface SkillContext {
   readonly bitable: BitableClient;
   readonly retrievers: Readonly<Record<string, Retriever>>;
   readonly logger: Logger;
+  readonly docx: DocxClient;
 }
 
 /** Skill 副作用：写 Bitable / 调外部 webhook / 触发其他 skill 等 */
