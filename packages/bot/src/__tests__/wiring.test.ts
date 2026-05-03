@@ -47,6 +47,7 @@ function makeCtx(event: BotEvent, runtimeOverride?: BotRuntime): SkillContext {
     llm: {} as SkillContext['llm'],
     bitable: {} as SkillContext['bitable'],
     docx: {} as SkillContext['docx'],
+    slides: {} as SkillContext['slides'],
     cardBuilder: { build: vi.fn() } as unknown as SkillContext['cardBuilder'],
     retrievers: {},
     logger: {
@@ -126,6 +127,29 @@ describe('handleEvent wiring', () => {
 
     expect((ctx.logger.error as ReturnType<typeof vi.fn>)).toHaveBeenCalledOnce();
     expect(runtime.sendText).not.toHaveBeenCalled();
+  });
+
+  it('sendCard returns err → logs and does not report success', async () => {
+    const failRuntime = {
+      ...makeRuntime(),
+      sendCard: vi.fn().mockResolvedValue(err(makeError(ErrorCode.FEISHU_API_ERROR, 'bad card'))),
+    } as unknown as BotRuntime;
+    const cardSkill: Skill = {
+      ...qaSkill,
+      match: () => true,
+      run: vi.fn().mockResolvedValue(ok({ card: { templateName: 'qa', content: {} } })),
+    };
+    const msg = makeMessage({ text: '这是什么？', mentions: [{ user: { userId: BOT_ID }, key: '@_bot' }] });
+    const ctx = makeCtx(makeEvent(msg), failRuntime);
+
+    await handleEvent(ctx, router, { qa: cardSkill } as unknown as Record<SkillName, Skill>);
+
+    expect(failRuntime.sendCard).toHaveBeenCalledOnce();
+    expect((ctx.logger.error as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(
+      'send card failed',
+      expect.objectContaining({ code: ErrorCode.FEISHU_API_ERROR }),
+    );
+    expect(ctx.logger.info).not.toHaveBeenCalledWith(expect.stringContaining('replied'));
   });
 
   // 6. intent='silent'（非 qa/meetingNotes 等消息）→ 不触发任何 skill

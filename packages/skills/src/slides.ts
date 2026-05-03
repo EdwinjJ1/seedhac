@@ -2,7 +2,7 @@
  * 🅳 slides — 幻灯片生成
  *
  * 触发：被动监听，群里出现 PPT/演示/汇报相关讨论后自动生成
- * 数据流：群聊上下文 + Bitable 快照 → LLM 生成大纲 → 飞书文档（markdown）→ slides 卡片
+ * 数据流：群聊上下文 + Bitable 快照 → LLM 生成大纲 → 飞书演示文稿 → slides 卡片
  */
 
 import type { Message, Skill } from '@seedhac/contracts';
@@ -26,20 +26,44 @@ export const slidesSkill: Skill = {
     const msg = ctx.event.payload as Message;
     const chatId = msg.chatId;
 
+    ctx.logger.info('slides: received request', { chatId, messageId: msg.messageId });
+    const ackResult = await ctx.runtime.sendText({
+      chatId,
+      text: '收到，正在生成演示文稿。这个过程可能需要 30 秒左右，我生成好后会把卡片发到群里。',
+    });
+    if (!ackResult.ok) {
+      ctx.logger.warn('slides: progress acknowledgement failed', {
+        code: ackResult.error.code,
+        message: ackResult.error.message,
+      });
+    }
+
     // a. 拉取群历史消息
+    ctx.logger.info('slides: fetching chat history', { chatId });
     const historyResult = await ctx.runtime.fetchHistory({ chatId, pageSize: 30 });
     if (!historyResult.ok) return err(historyResult.error);
     const history = historyResult.value.messages;
 
     // b. 查 Bitable 项目快照
+    ctx.logger.info('slides: fetching bitable snapshots', { chatId });
     const snapshotResult = await ctx.bitable.find({
       table: 'memory',
       where: { chatId },
       pageSize: 3,
     });
     const snapshots = snapshotResult.ok ? snapshotResult.value.records : [];
+    if (!snapshotResult.ok) {
+      ctx.logger.warn('slides: bitable snapshots skipped', {
+        code: snapshotResult.error.code,
+        message: snapshotResult.error.message,
+      });
+    }
 
     // c. LLM 生成大纲
+    ctx.logger.info('slides: asking LLM for outline', {
+      historyCount: history.length,
+      snapshotCount: snapshots.length,
+    });
     const outlineResult = await ctx.llm.askStructured(
       SLIDES_PROMPT(history, snapshots),
       OutlineSchema,
@@ -48,21 +72,19 @@ export const slidesSkill: Skill = {
     if (!outlineResult.ok) return err(outlineResult.error);
     const outline = outlineResult.value;
 
-    // d. 序列化为 markdown
-    const markdown =
-      `# ${outline.title}\n\n` +
-      outline.slides
-        .map((s) => `## ${s.heading}\n${s.bullets.map((b) => `- ${b}`).join('\n')}`)
-        .join('\n\n');
+    // d. 创建飞书演示文稿
+    ctx.logger.info('slides: creating native presentation', {
+      title: outline.title,
+      pageCount: outline.slides.length,
+    });
+    const slidesResult = await ctx.slides.createFromOutline(outline.title, outline);
+    if (!slidesResult.ok) return err(slidesResult.error);
 
-    // e. 创建飞书文档
-    const docResult = await ctx.docx.createFromMarkdown(outline.title, markdown);
-    if (!docResult.ok) return err(docResult.error);
-
-    // f. 构建 slides 卡片
+    // e. 构建 slides 卡片
+    ctx.logger.info('slides: presentation created', { url: slidesResult.value.url });
     const card = ctx.cardBuilder.build('slides', {
       title: outline.title,
-      presentationUrl: docResult.value.url,
+      presentationUrl: slidesResult.value.url,
       pageCount: outline.slides.length,
       preview: outline.slides.slice(0, 2).map((s) => ({
         title: s.heading,

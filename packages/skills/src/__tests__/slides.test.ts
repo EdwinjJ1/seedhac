@@ -41,7 +41,10 @@ const MOCK_OUTLINE = {
   ],
 };
 
-const MOCK_DOC_REF = { docToken: 'doxcnABCDEF', url: 'https://example.feishu.cn/docs/abc' };
+const MOCK_SLIDES_REF = {
+  slidesToken: 'sldcnABCDEF',
+  url: 'https://example.feishu.cn/slides/abc',
+};
 const MOCK_CARD: Card = { templateName: 'slides', content: { mock: true } };
 
 function makeRuntime(): BotRuntime {
@@ -90,8 +93,11 @@ function makeCtx(
       create: vi.fn(),
       appendBlocks: vi.fn(),
       getShareLink: vi.fn(),
-      createFromMarkdown: vi.fn().mockResolvedValue(ok(MOCK_DOC_REF)),
+      createFromMarkdown: vi.fn(),
     } as unknown as SkillContext['docx'],
+    slides: {
+      createFromOutline: vi.fn().mockResolvedValue(ok(MOCK_SLIDES_REF)),
+    } as unknown as SkillContext['slides'],
     cardBuilder: makeCardBuilder(),
     retrievers: {},
     logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -157,16 +163,16 @@ describe('slidesSkill.run() — happy path', () => {
     await slidesSkill.run(ctx);
     expect(ctx.cardBuilder.build).toHaveBeenCalledWith('slides', expect.objectContaining({
       title: MOCK_OUTLINE.title,
-      presentationUrl: MOCK_DOC_REF.url,
+      presentationUrl: MOCK_SLIDES_REF.url,
       pageCount: MOCK_OUTLINE.slides.length,
     }));
   });
 
-  it('calls docx.createFromMarkdown with outline title', async () => {
+  it('calls slides.createFromOutline with outline title', async () => {
     await slidesSkill.run(ctx);
-    expect(ctx.docx.createFromMarkdown).toHaveBeenCalledWith(
+    expect(ctx.slides.createFromOutline).toHaveBeenCalledWith(
       MOCK_OUTLINE.title,
-      expect.stringContaining(MOCK_OUTLINE.title),
+      MOCK_OUTLINE,
     );
   });
 
@@ -174,6 +180,16 @@ describe('slidesSkill.run() — happy path', () => {
     await slidesSkill.run(ctx);
     expect(ctx.runtime.fetchHistory).toHaveBeenCalledWith(
       expect.objectContaining({ chatId: 'oc_chat_001' }),
+    );
+  });
+
+  it('sends an immediate progress acknowledgement', async () => {
+    await slidesSkill.run(ctx);
+    expect(ctx.runtime.sendText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: 'oc_chat_001',
+        text: expect.stringContaining('正在生成演示文稿'),
+      }),
     );
   });
 
@@ -217,33 +233,27 @@ describe('slidesSkill.run() — error paths', () => {
     if (!result.ok) expect(result.error.code).toBe(ErrorCode.LLM_TIMEOUT);
   });
 
-  it('returns err when docx.createFromMarkdown fails', async () => {
+  it('returns err when slides.createFromOutline fails', async () => {
     const ctx = makeCtx(makeEvent('做个ppt'), {
-      docx: {
-        create: vi.fn(),
-        appendBlocks: vi.fn(),
-        getShareLink: vi.fn(),
-        createFromMarkdown: vi.fn().mockResolvedValue(
-          err(makeError(ErrorCode.FEISHU_API_ERROR, 'doc create failed')),
+      slides: {
+        createFromOutline: vi.fn().mockResolvedValue(
+          err(makeError(ErrorCode.FEISHU_API_ERROR, 'slides create failed')),
         ),
-      } as unknown as SkillContext['docx'],
+      } as unknown as SkillContext['slides'],
     });
     const result = await slidesSkill.run(ctx);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe(ErrorCode.FEISHU_API_ERROR);
   });
 
-  it('does not call cardBuilder.build when docx creation fails', async () => {
+  it('does not call cardBuilder.build when slides creation fails', async () => {
     const cardBuilder = makeCardBuilder();
     const ctx = makeCtx(makeEvent('做个ppt'), {
-      docx: {
-        create: vi.fn(),
-        appendBlocks: vi.fn(),
-        getShareLink: vi.fn(),
-        createFromMarkdown: vi.fn().mockResolvedValue(
-          err(makeError(ErrorCode.FEISHU_API_ERROR, 'doc create failed')),
+      slides: {
+        createFromOutline: vi.fn().mockResolvedValue(
+          err(makeError(ErrorCode.FEISHU_API_ERROR, 'slides create failed')),
         ),
-      } as unknown as SkillContext['docx'],
+      } as unknown as SkillContext['slides'],
       cardBuilder,
     });
     await slidesSkill.run(ctx);

@@ -128,6 +128,24 @@ export class LarkBitableClient implements BitableClient {
     return this.config.tableIds[kind];
   }
 
+  private ensureConfigured(kind: BitableTableKind): Result<{ appToken: string; tableId: string }> {
+    const tableId = this.tid(kind);
+    if (!this.config.appToken || !tableId) {
+      return err(
+        makeError(
+          ErrorCode.CONFIG_MISSING,
+          `bitable ${kind} table is not configured`,
+          undefined,
+          {
+            hasAppToken: Boolean(this.config.appToken),
+            hasTableId: Boolean(tableId),
+          },
+        ),
+      );
+    }
+    return ok({ appToken: this.config.appToken, tableId });
+  }
+
   /** 每次飞书 API 调用都经过限流 + 重试 */
   private async call<T>(fn: () => Promise<T>): Promise<T> {
     await this.limiter.acquire();
@@ -135,11 +153,13 @@ export class LarkBitableClient implements BitableClient {
   }
 
   async find(params: FindParams): Promise<Result<FindResult>> {
-    const tableId = this.tid(params.table);
+    const configResult = this.ensureConfigured(params.table);
+    if (!configResult.ok) return configResult;
+    const { appToken, tableId } = configResult.value;
     try {
       const res = await this.call(() =>
         this.larkClient.bitable.appTableRecord.list({
-          path: { app_token: this.config.appToken, table_id: tableId },
+          path: { app_token: appToken, table_id: tableId },
           params: {
             page_size: params.pageSize ?? 20,
             ...(params.pageToken !== undefined && { page_token: params.pageToken }),
@@ -169,11 +189,13 @@ export class LarkBitableClient implements BitableClient {
   }
 
   async insert(params: InsertParams): Promise<Result<RecordRef>> {
-    const tableId = this.tid(params.table);
+    const configResult = this.ensureConfigured(params.table);
+    if (!configResult.ok) return configResult;
+    const { appToken, tableId } = configResult.value;
     try {
       const res = await this.call(() =>
         this.larkClient.bitable.appTableRecord.create({
-          path: { app_token: this.config.appToken, table_id: tableId },
+          path: { app_token: appToken, table_id: tableId },
           data: { fields: toLarkFields(params.row) },
         }),
       );
@@ -190,7 +212,9 @@ export class LarkBitableClient implements BitableClient {
   }
 
   async batchInsert(params: BatchInsertParams): Promise<Result<readonly RecordRef[]>> {
-    const tableId = this.tid(params.table);
+    const configResult = this.ensureConfigured(params.table);
+    if (!configResult.ok) return configResult;
+    const { appToken, tableId } = configResult.value;
     const chunkSize = Math.min(params.batchSize ?? 500, 500);
     const rows = [...params.rows];
     const results: RecordRef[] = [];
@@ -200,7 +224,7 @@ export class LarkBitableClient implements BitableClient {
         const chunk = rows.slice(i, i + chunkSize);
         const res = await this.call(() =>
           this.larkClient.bitable.appTableRecord.batchCreate({
-            path: { app_token: this.config.appToken, table_id: tableId },
+            path: { app_token: appToken, table_id: tableId },
             data: {
               records: chunk.map((row) => ({ fields: toLarkFields(row) })),
             },
@@ -223,12 +247,14 @@ export class LarkBitableClient implements BitableClient {
   }
 
   async update(params: UpdateParams): Promise<Result<void>> {
-    const tableId = this.tid(params.table);
+    const configResult = this.ensureConfigured(params.table);
+    if (!configResult.ok) return configResult;
+    const { appToken, tableId } = configResult.value;
     try {
       await this.call(() =>
         this.larkClient.bitable.appTableRecord.update({
           path: {
-            app_token: this.config.appToken,
+            app_token: appToken,
             table_id: tableId,
             record_id: params.recordId,
           },
@@ -242,12 +268,14 @@ export class LarkBitableClient implements BitableClient {
   }
 
   async delete(params: DeleteParams): Promise<Result<void>> {
-    const tableId = this.tid(params.table);
+    const configResult = this.ensureConfigured(params.table);
+    if (!configResult.ok) return configResult;
+    const { appToken, tableId } = configResult.value;
     try {
       await this.call(() =>
         this.larkClient.bitable.appTableRecord.delete({
           path: {
-            app_token: this.config.appToken,
+            app_token: appToken,
             table_id: tableId,
             record_id: params.recordId,
           },

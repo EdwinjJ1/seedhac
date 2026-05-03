@@ -7,3 +7,4 @@ export * from './bitable.js';
 export * from './retriever.js';
 export * from './skill.js';
 export * from './docx.js';
+export * from './slides.js';

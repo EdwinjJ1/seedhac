@@ -264,7 +264,7 @@ export class LarkBotRuntime implements BotRuntime {
   async sendCard(params: SendCardParams): Promise<Result<SentMessage>> {
     await this.limiter.acquire();
     try {
-      const content = JSON.stringify(params.card);
+      const content = JSON.stringify(params.card.content);
       const res = params.replyTo
         ? await this.client.im.message.reply({
             path: { message_id: params.replyTo },
@@ -299,7 +299,7 @@ export class LarkBotRuntime implements BotRuntime {
     try {
       const res = await this.client.im.message.patch({
         path: { message_id: params.messageId },
-        data: { content: JSON.stringify(params.card) },
+        data: { content: JSON.stringify(params.card.content) },
       });
 
       this.patchTimes.set(params.messageId, Date.now());

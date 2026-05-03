@@ -5,6 +5,7 @@ import { LarkBitableClient } from './bitable-client.js';
 import { larkCardBuilder } from './card-builder.js';
 import { createDocxClient } from './docx-client.js';
 import { VolcanoLLMClient } from './llm-client.js';
+import { createSlidesClient } from './slides-client.js';
 import { SkillRouter } from './skill-router.js';
 import { handleEvent } from './wiring.js';
 
@@ -67,6 +68,7 @@ async function main(): Promise<void> {
       retrievers: {},
       logger,
       docx: createDocxClient(),
+      slides: createSlidesClient(),
       cardBuilder: larkCardBuilder,
     };
     await handleEvent(ctx, router, skillsByName);
