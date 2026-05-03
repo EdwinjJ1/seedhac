@@ -179,6 +179,31 @@ describe('recallSkill', () => {
     if (result.ok) expect(result.value.text).toContain('5 月');
   });
 
+  it('run cache miss: run() re-runs gap detection when match() was not called first', async () => {
+    // Simulate run() called directly without prior match() — cache is empty
+    const messageId = 'msg_cachemiss';
+    const ctx = makeCtx(makeEvent('上次那个方案是什么', messageId));
+
+    // run() will call fetchHistory and detectGap itself
+    mockFetchHistory.mockResolvedValueOnce({
+      ok: true,
+      value: { messages: [makeMessage('上次那个方案是什么', messageId)], hasMore: false },
+    });
+    mockLLMAsk.mockResolvedValueOnce({
+      ok: true,
+      value: '{"shouldRecall":true,"reason":"方案未追溯","query":"项目方案"}',
+    });
+    mockVectorRetrieve.mockResolvedValueOnce({ ok: true, value: [makeHit('h1', '采用方案A')] });
+    mockBitableRetrieve.mockResolvedValueOnce({ ok: true, value: [] });
+    mockLLMAsk.mockResolvedValueOnce({ ok: true, value: '上次确定的是方案A。' });
+
+    const result = await recallSkill.run(ctx);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.text).toBe('上次确定的是方案A。');
+    expect(mockLLMAsk).toHaveBeenCalledTimes(2); // detection + synthesis
+  });
+
   it('run handles total retriever failure and returns empty text', async () => {
     const messageId = 'msg_retrieverr';
     const ctx = makeCtx(makeEvent('我记得之前讨论过这个', messageId));
