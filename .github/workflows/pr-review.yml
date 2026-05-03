@@ -1,0 +1,61 @@
+name: PR Auto Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    branches: [main]
+
+jobs:
+  review:
+    name: Claude Code Review
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get PR diff
+        id: diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr diff ${{ github.event.pull_request.number }} > pr.diff
+          echo "diff_size=$(wc -c < pr.diff)" >> $GITHUB_OUTPUT
+
+      - name: Review with Claude
+        id: claude_review
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          DIFF=$(cat pr.diff | head -c 30000)
+          RESPONSE=$(curl -s https://api.anthropic.com/v1/messages \
+            -H "x-api-key: $ANTHROPIC_API_KEY" \
+            -H "anthropic-version: 2023-06-01" \
+            -H "content-type: application/json" \
+            -d @- <<EOF
+          {
+            "model": "claude-sonnet-4-6",
+            "max_tokens": 1024,
+            "messages": [
+              {
+                "role": "user",
+                "content": "你是代码审查专家。审查以下 PR diff，重点检查：\n1. 安全漏洞（注入、越权、数据泄漏等）\n2. 明显的代码 bug\n3. 严重的性能或逻辑问题\n\n规则：\n- 不要挑剔风格、命名、注释等小问题\n- 如果有严重问题，只指出最严重的那一个，用中文简明描述（3-5句话，包含具体文件和行为）\n- 如果没有严重问题，只回复：LGTM\n- 回复不要加任何额外说明\n\nDiff:\n\`\`\`\n${DIFF}\n\`\`\`"
+              }
+            ]
+          }
+          EOF
+          )
+          COMMENT=$(echo "$RESPONSE" | python3 -c "import sys,json; data=json.load(sys.stdin); print(data['content'][0]['text'])" 2>/dev/null || echo "LGTM")
+          echo "comment<<COMMENT_EOF" >> $GITHUB_OUTPUT
+          echo "$COMMENT" >> $GITHUB_OUTPUT
+          echo "COMMENT_EOF" >> $GITHUB_OUTPUT
+
+      - name: Post review comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr comment ${{ github.event.pull_request.number }} --body "${{ steps.claude_review.outputs.comment }}"
