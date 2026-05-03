@@ -14,14 +14,12 @@ import { skills } from '@seedhac/skills';
 
 // ─── 硬编码回复（临时好玩用，Skill Router 上线后删） ──────────────────────────
 
-const BARE_MENTION_REPLIES = [
-  '傻逼吧，@你爹我不说话',
-];
+const BARE_MENTION_REPLIES = ['傻逼吧，@你爹我不说话'];
 
 const KEYWORD_REPLIES: Array<{ test: RegExp; replies: string[] }> = [
   {
     test: /你好|hi|hello|嗨/i,
-    replies: ['你好你好，有事吗', '哦', '嗯', "来了老6"],
+    replies: ['你好你好，有事吗', '哦', '嗯', '来了老6'],
   },
   {
     test: /谢谢|感谢|thx|thanks/i,
@@ -29,7 +27,13 @@ const KEYWORD_REPLIES: Array<{ test: RegExp; replies: string[] }> = [
   },
   {
     test: /废物|没用|垃圾/i,
-    replies: ['你行你来', '…我记仇', '好的，已记录，复盘时翻出来', '好啊，等你来打我啊', '滚吧，傻逼'],
+    replies: [
+      '你行你来',
+      '…我记仇',
+      '好的，已记录，复盘时翻出来',
+      '好啊，等你来打我啊',
+      '滚吧，傻逼',
+    ],
   },
   {
     test: /nb|牛|厉害|强/i,
@@ -85,9 +89,7 @@ function readEnv(): LarkEnv {
   if (!appId) missing.push('LARK_APP_ID');
   if (!appSecret) missing.push('LARK_APP_SECRET');
   if (missing.length > 0) {
-    throw new Error(
-      `缺少环境变量：${missing.join(', ')}。复制 .env.example 为 .env 并填值。`,
-    );
+    throw new Error(`缺少环境变量：${missing.join(', ')}。复制 .env.example 为 .env 并填值。`);
   }
 
   return {
@@ -145,7 +147,9 @@ async function main(): Promise<void> {
       const mentions = data.message?.mentions ?? [];
       const isMentioned = mentions.length > 0;
 
-      console.info(`[seedhac/bot] 群消息 chat=${chatId} sender=${sender} mentioned=${isMentioned} text=${text}`);
+      console.info(
+        `[seedhac/bot] 群消息 chat=${chatId} sender=${sender} mentioned=${isMentioned} text=${text}`,
+      );
 
       // 硬编码回复（临时）
       const reply = hardcodedReply(text, isMentioned);

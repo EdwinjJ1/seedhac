@@ -58,11 +58,9 @@ const schema = {
   },
 };
 
-const structuredResult = await llm.askStructured(
-  '请用 JSON 格式描述飞书这个产品。',
-  schema,
-  { model: 'pro' },
-);
+const structuredResult = await llm.askStructured('请用 JSON 格式描述飞书这个产品。', schema, {
+  model: 'pro',
+});
 
 if (structuredResult.ok) {
   console.log('✅ 成功');

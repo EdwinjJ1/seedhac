@@ -16,6 +16,7 @@ import type { LLMClient } from './llm.js';
 import type { BotEvent } from './message.js';
 import type { Retriever } from './retriever.js';
 import type { Result } from './result.js';
+import type { DocxClient } from './docx.js';
 
 /** 7 条主线对应的稳定字符串 ID */
 export type SkillName = 'qa' | 'recall' | 'summary' | 'slides' | 'archive' | 'weekly';
@@ -51,6 +52,7 @@ export interface SkillContext {
   readonly bitable: BitableClient;
   readonly retrievers: Readonly<Record<string, Retriever>>;
   readonly logger: Logger;
+  readonly docx: DocxClient;
 }
 
 /** Skill 副作用：写 Bitable / 调外部 webhook / 触发其他 skill 等 */
