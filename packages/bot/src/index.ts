@@ -2,6 +2,8 @@ import type { Logger, SkillContext } from '@seedhac/contracts';
 import { skillsByName } from '@seedhac/skills';
 import { createBotRuntime } from './bot-runtime.js';
 import { LarkBitableClient } from './bitable-client.js';
+import { larkCardBuilder } from './card-builder.js';
+import { createDocxClient } from './docx-client.js';
 import { VolcanoLLMClient } from './llm-client.js';
 import { SkillRouter } from './skill-router.js';
 import { handleEvent } from './wiring.js';
@@ -64,6 +66,8 @@ async function main(): Promise<void> {
       bitable,
       retrievers: {},
       logger,
+      docx: createDocxClient(),
+      cardBuilder: larkCardBuilder,
     };
     await handleEvent(ctx, router, skillsByName);
   });
