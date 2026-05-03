@@ -114,7 +114,10 @@ describe('LarkBotRuntime', () => {
   it('sendCard calls SDK create with msg_type interactive', async () => {
     mockMessageCreate.mockResolvedValue({ code: 0, data: { message_id: 'msg_3' } });
     const runtime = makeRuntime();
-    const card = { type: 'card', header: { title: 'test' } } as unknown as Card;
+    const card = {
+      templateName: 'qa',
+      content: { schema: '2.0', header: { title: 'test' } },
+    } as unknown as Card;
 
     const result = await runtime.sendCard({ chatId: 'oc_chat1', card });
 
@@ -122,6 +125,8 @@ describe('LarkBotRuntime', () => {
     expect(mockMessageCreate).toHaveBeenCalledOnce();
     const callArgs = mockMessageCreate.mock.calls[0]![0];
     expect(callArgs.data.msg_type).toBe('interactive');
+    expect(JSON.parse(callArgs.data.content)).toEqual(card.content);
+    expect(callArgs.data.content).not.toContain('templateName');
   });
 
   // 4. fetchHistory → 返回正确的 FetchHistoryResult
@@ -215,5 +220,36 @@ describe('LarkBotRuntime', () => {
     });
 
     expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('card action event triggers handler with action payload', async () => {
+    const runtime = makeRuntime();
+    const handler: EventHandler = vi.fn();
+    runtime.on(handler);
+    await runtime.start();
+
+    const registeredHandlers = mockRegister.mock.calls[0]![0] as Record<
+      string,
+      (data: unknown) => Promise<unknown>
+    >;
+    const actionHandler = registeredHandlers['card.action.trigger']!;
+
+    await actionHandler({
+      context: { open_message_id: 'om_card1', open_chat_id: 'oc_chat1' },
+      operator: { open_id: 'ou_user1', name: '张三' },
+      action: {
+        tag: 'button',
+        value: { action: 'qa.reanswer', questionMessageId: 'msg_1' },
+      },
+    });
+
+    expect(handler).toHaveBeenCalledOnce();
+    const event = (handler as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(event.type).toBe('cardAction');
+    expect(event.payload.chatId).toBe('oc_chat1');
+    expect(event.payload.messageId).toBe('om_card1');
+    expect(event.payload.user.userId).toBe('ou_user1');
+    expect(event.payload.value).toEqual({ action: 'qa.reanswer', questionMessageId: 'msg_1' });
+    await expect(actionHandler({})).resolves.toBeUndefined();
   });
 });

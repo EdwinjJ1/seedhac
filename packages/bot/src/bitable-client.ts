@@ -281,6 +281,31 @@ export class LarkBitableClient implements BitableClient {
       return err(makeError(ErrorCode.FEISHU_API_ERROR, 'link failed', e));
     }
   }
+
+  async readTable(appToken: string, tableId: string, maxRows = 50): Promise<Result<string>> {
+    try {
+      const res = await this.call(() =>
+        this.larkClient.bitable.appTableRecord.list({
+          path: { app_token: appToken, table_id: tableId },
+          params: { page_size: Math.min(maxRows, 100) },
+        }),
+      );
+      if (!res.data?.items?.length) {
+        return ok('（多维表格暂无记录）');
+      }
+      const rows = res.data.items;
+      const allKeys = [...new Set(rows.flatMap((r) => Object.keys(r.fields as object)))];
+      const header = allKeys.join(' | ');
+      const lines = rows.map((r) => {
+        const fields = r.fields as Record<string, unknown>;
+        return allKeys.map((k) => String(fields[k] ?? '')).join(' | ');
+      });
+      return ok([header, ...lines].join('\n'));
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return err(makeError(ErrorCode.FEISHU_API_ERROR, `readTable error: ${msg}`, e));
+    }
+  }
 }
 
 // ---------- 工厂函数（从环境变量读取配置）----------

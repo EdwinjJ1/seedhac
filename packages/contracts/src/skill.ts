@@ -26,8 +26,8 @@ export type SkillName =
   | 'slides'
   | 'archive'
   | 'weekly'
-  | 'requirementDoc'  // 被动监听需求描述 → 生成结构化飞书文档
-  | 'docIterate';     // 持续监听对话 → 增量更新已有需求文档
+  | 'requirementDoc' // 被动监听需求描述 → 生成结构化飞书文档
+  | 'docIterate'; // 持续监听对话 → 增量更新已有需求文档
 
 /** 触发条件描述（声明式，便于在 docs / debug UI 上展示） */
 export interface TriggerSpec {

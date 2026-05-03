@@ -77,4 +77,6 @@ export interface BitableClient {
   update(params: UpdateParams): Promise<Result<void>>;
   delete(params: DeleteParams): Promise<Result<void>>;
   link(params: LinkParams): Promise<Result<void>>;
+  /** 读取任意多维表格的记录，返回可供 LLM 消费的纯文本摘要 */
+  readTable(appToken: string, tableId: string, maxRows?: number): Promise<Result<string>>;
 }

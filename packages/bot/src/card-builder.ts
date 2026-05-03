@@ -91,19 +91,41 @@ function btn(
 function renderSources(sources: readonly CardSource[]): string {
   if (sources.length === 0) return '';
   const kindMap: Record<CardSource['kind'], string> = {
+    doc: '📄 文档',
     wiki: '📄 Wiki',
+    slides: '🖼 幻灯片',
     bitable: '📊 表格',
     chat: '💬 群聊',
     minutes: '🎙 妙记',
     web: '🌐 网页',
     other: '📎 其他',
   };
+
+  const timeFormat = new Intl.DateTimeFormat('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+
   return `**来源**\n${sources
-    .map(
-      (s) =>
-        `- ${kindMap[s.kind]} ${s.url ? `[${s.title}](${s.url})` : s.title}${s.snippet ? `：${s.snippet}` : ''}`,
-    )
-    .join('\n')}`;
+    .map((s, i) => {
+      const author = s.authorName ? s.authorName : '';
+      const time = s.timestamp ? timeFormat.format(new Date(s.timestamp)) : '';
+      const byline = [author, time].filter(Boolean).join(' · ');
+
+      if (s.kind === 'chat') {
+        // Format: "1. 💬 author · time — snippet" all on one line
+        const label = s.url ? `[${s.title}](${s.url})` : s.title;
+        const who = byline || label;
+        const snippet = s.snippet ? s.snippet : label;
+        return `${i + 1}. ${kindMap[s.kind]} **${who}** — ${snippet}`;
+      }
+
+      const title = s.url ? `[${s.title}](${s.url})` : s.title;
+      const heading = `${i + 1}. ${kindMap[s.kind]} ${title}${byline ? `｜${byline}` : ''}`;
+      return s.snippet ? `${heading}\n   ${s.snippet}` : heading;
+    })
+    .join('\n\n')}`;
 }
 
 function renderButtons(btns: readonly CardButton[]): ButtonElement[] {
