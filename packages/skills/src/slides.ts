@@ -6,7 +6,7 @@
  */
 
 import type { Message, Skill } from '@seedhac/contracts';
-import { err, ok } from '@seedhac/contracts';
+import { ErrorCode, err, makeError, ok } from '@seedhac/contracts';
 import { OutlineSchema, SLIDES_PROMPT } from './prompts/slides.js';
 
 export const slidesSkill: Skill = {
@@ -25,6 +25,10 @@ export const slidesSkill: Skill = {
   run: async (ctx) => {
     const msg = ctx.event.payload as Message;
     const chatId = msg.chatId;
+
+    if (!ctx.slides) {
+      return err(makeError(ErrorCode.CONFIG_MISSING, 'slides client is not configured'));
+    }
 
     ctx.logger.info('slides: received request', { chatId, messageId: msg.messageId });
     const ackResult = await ctx.runtime.sendText({

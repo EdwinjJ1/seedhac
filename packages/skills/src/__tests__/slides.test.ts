@@ -97,7 +97,7 @@ function makeCtx(
     } as unknown as SkillContext['docx'],
     slides: {
       createFromOutline: vi.fn().mockResolvedValue(ok(MOCK_SLIDES_REF)),
-    } as unknown as SkillContext['slides'],
+    } as unknown as NonNullable<SkillContext['slides']>,
     cardBuilder: makeCardBuilder(),
     retrievers: {},
     logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -170,7 +170,7 @@ describe('slidesSkill.run() — happy path', () => {
 
   it('calls slides.createFromOutline with outline title', async () => {
     await slidesSkill.run(ctx);
-    expect(ctx.slides.createFromOutline).toHaveBeenCalledWith(
+    expect(ctx.slides?.createFromOutline).toHaveBeenCalledWith(
       MOCK_OUTLINE.title,
       MOCK_OUTLINE,
     );
@@ -218,6 +218,14 @@ describe('slidesSkill.run() — error paths', () => {
     if (!result.ok) expect(result.error.code).toBe(ErrorCode.FEISHU_API_ERROR);
   });
 
+  it('returns err when slides client is missing', async () => {
+    const ctx = makeCtx(makeEvent('做个ppt')) as SkillContext & { slides?: never };
+    delete ctx.slides;
+    const result = await slidesSkill.run(ctx);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe(ErrorCode.CONFIG_MISSING);
+  });
+
   it('returns err when LLM times out', async () => {
     const ctx = makeCtx(makeEvent('做个ppt'), {
       llm: {
@@ -239,7 +247,7 @@ describe('slidesSkill.run() — error paths', () => {
         createFromOutline: vi.fn().mockResolvedValue(
           err(makeError(ErrorCode.FEISHU_API_ERROR, 'slides create failed')),
         ),
-      } as unknown as SkillContext['slides'],
+      } as unknown as NonNullable<SkillContext['slides']>,
     });
     const result = await slidesSkill.run(ctx);
     expect(result.ok).toBe(false);
@@ -253,7 +261,7 @@ describe('slidesSkill.run() — error paths', () => {
         createFromOutline: vi.fn().mockResolvedValue(
           err(makeError(ErrorCode.FEISHU_API_ERROR, 'slides create failed')),
         ),
-      } as unknown as SkillContext['slides'],
+      } as unknown as NonNullable<SkillContext['slides']>,
       cardBuilder,
     });
     await slidesSkill.run(ctx);

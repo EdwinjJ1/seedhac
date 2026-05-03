@@ -62,7 +62,7 @@ export interface SkillContext {
   readonly retrievers: Readonly<Record<string, Retriever>>;
   readonly logger: Logger;
   readonly docx: DocxClient;
-  readonly slides: SlidesClient;
+  readonly slides?: SlidesClient;
   readonly cardBuilder: CardBuilder;
 }
 

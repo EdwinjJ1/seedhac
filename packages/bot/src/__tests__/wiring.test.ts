@@ -58,7 +58,7 @@ function makeCtx(event: BotEvent, runtimeOverride?: BotRuntime): SkillContext {
     } as unknown as SkillContext['llm'],
     bitable: {} as SkillContext['bitable'],
     docx: {} as SkillContext['docx'],
-    slides: {} as SkillContext['slides'],
+    slides: {} as NonNullable<SkillContext['slides']>,
     cardBuilder: { build: vi.fn() } as unknown as SkillContext['cardBuilder'],
     retrievers: {},
     logger: {
