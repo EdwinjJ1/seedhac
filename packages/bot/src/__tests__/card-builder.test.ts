@@ -85,7 +85,9 @@ describe('qa card', () => {
       question: '复赛截止日期是什么时候？',
       answer: '复赛日期为 **2026-05-06**。',
       sources: [{ title: 'README', kind: 'wiki', snippet: '时间节点表' }],
-      buttons: [{ text: '查看原文', value: { action: 'open', target: 'readme' }, variant: 'primary' }],
+      buttons: [
+        { text: '查看原文', value: { action: 'open', target: 'readme' }, variant: 'primary' },
+      ],
     });
     expect(card.templateName).toBe('qa');
     const j = json(card);
