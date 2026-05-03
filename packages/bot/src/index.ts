@@ -46,14 +46,15 @@ function buildDeps() {
   });
 
   const docx = createDocxClient();
+  const slides = createSlidesClient();
 
-  return { runtime, router, llm, bitable, docx };
+  return { runtime, router, llm, bitable, docx, slides };
 }
 
 async function main(): Promise<void> {
   logger.info('booting');
 
-  const { runtime, router, llm, bitable, docx } = buildDeps();
+  const { runtime, router, llm, bitable, docx, slides } = buildDeps();
 
   runtime.on(async (event) => {
     if (event.type === 'message') {
@@ -77,12 +78,10 @@ async function main(): Promise<void> {
       llm,
       bitable,
       docx,
+      slides,
       cardBuilder: larkCardBuilder,
       retrievers: {},
       logger,
-      docx: createDocxClient(),
-      slides: createSlidesClient(),
-      cardBuilder: larkCardBuilder,
     };
     await handleEvent(ctx, router, skillsByName);
   });

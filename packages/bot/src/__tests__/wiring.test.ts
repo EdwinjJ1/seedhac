@@ -59,7 +59,9 @@ function makeCtx(event: BotEvent, runtimeOverride?: BotRuntime): SkillContext {
     bitable: {} as SkillContext['bitable'],
     docx: {} as SkillContext['docx'],
     slides: {} as NonNullable<SkillContext['slides']>,
-    cardBuilder: { build: vi.fn() } as unknown as SkillContext['cardBuilder'],
+    cardBuilder: {
+      build: vi.fn().mockReturnValue({ templateName: 'qa', content: { built: true } }),
+    } as unknown as SkillContext['cardBuilder'],
     retrievers: {},
     logger: {
       debug: vi.fn(),
