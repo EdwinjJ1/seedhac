@@ -3,6 +3,7 @@ import type { Logger, SkillContext } from '@seedhac/contracts';
 import { skillsByName } from '@seedhac/skills';
 import { createBotRuntime } from './bot-runtime.js';
 import { LarkBitableClient } from './bitable-client.js';
+import { larkCardBuilder } from './card-builder.js';
 import { LarkDocxClient } from './docx-client.js';
 import { VolcanoLLMClient } from './llm-client.js';
 import { SkillRouter } from './skill-router.js';
@@ -68,6 +69,7 @@ async function main(): Promise<void> {
       llm,
       bitable,
       docx,
+      cardBuilder: larkCardBuilder,
       retrievers: {},
       logger,
     };
