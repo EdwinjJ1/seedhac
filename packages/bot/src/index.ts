@@ -76,9 +76,9 @@ async function main(): Promise<void> {
       llm,
       bitable,
       docx,
+      cardBuilder: larkCardBuilder,
       retrievers: {},
       logger,
-      cardBuilder: larkCardBuilder,
     };
     await handleEvent(ctx, router, skillsByName);
   });
