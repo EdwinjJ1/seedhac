@@ -24,13 +24,15 @@ cron 触发（周五 17:00）
 
 ## 卡片格式（CardBuilder template: `weekly`）
 
-| 字段 | 说明 |
-|------|------|
-| `weekRange` | 周期（如 "2026-04-27 ~ 2026-05-01"） |
-| `highlights` | 本周亮点（≤5 条） |
-| `decisions` | 本周重要决策（≤5 条） |
-| `todos` | 未完成待办（从 Bitable todo 表拉取 status=open） |
-| `nextWeek` | 下周预告（LLM 从讨论中提取，可选） |
+对应合约类型 `WeeklyCardInput`（`packages/contracts/src/card.ts`）：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `weekRange` | `string` | 周期（如 "2026-04-27 ~ 2026-05-01"） |
+| `highlights` | `string[]` | 本周亮点（≤5 条） |
+| `decisions` | `string[]` | 本周重要决策（≤5 条） |
+| `todos` | `string[]` | 未完成待办文本列表（从 Bitable todo 表拉取 status=open） |
+| `metrics?` | `Record<string, number>` | 关键指标（可选，如消息数/决策数） |
 
 ## 定时配置
 

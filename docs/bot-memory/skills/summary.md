@@ -27,7 +27,7 @@
 | `title` | string | 纪要标题（LLM 生成，≤30 字） |
 | `topics` | string[] | 议题列表 |
 | `decisions` | string[] | 决议列表 |
-| `todos` | `{ title; assignee?; due? }[]` | 待办列表 |
+| `todos` | `{ text: string; assignee?: string; due?: string }[]` | 待办列表 |
 | `followUps` | string[] | 待跟进事项 |
 
 ## 时间窗解析规则

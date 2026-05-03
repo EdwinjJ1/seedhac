@@ -28,12 +28,14 @@
 
 ## 卡片格式（CardBuilder template: `slides`）
 
-| 字段 | 说明 |
-|------|------|
-| `title` | PPT 标题（LLM 从大纲提取） |
-| `outline` | 章节列表（H2 标题，≤8 项） |
-| `docUrl` | 飞书文档跳转链接 |
-| `hint` | 提示文案："点击链接在飞书文档中查看并转为 PPT" |
+对应合约类型 `SlidesCardInput`（`packages/contracts/src/card.ts`）：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `title` | `string` | PPT 标题（LLM 从大纲提取） |
+| `presentationUrl` | `string` | 飞书演示文稿跳转链接 |
+| `pageCount` | `number` | 幻灯片页数 |
+| `preview?` | `{ title: string; bullets: string[] }[]` | 章节预览（可选，≤8 章） |
 
 ## 大纲格式规范
 

@@ -41,11 +41,14 @@
 
 ## 卡片格式（CardBuilder template: `recall`）
 
-| 字段 | 说明 |
-|------|------|
-| `query` | GapDetector 提取的检索意图 |
-| `hits` | 召回结果列表（标题 + 摘要 + 时间，≤3 条） |
-| `reason` | 为何在此时浮出（给用户的解释） |
+对应合约类型 `RecallCardInput`（`packages/contracts/src/card.ts`）：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `trigger` | `string` | 触发召回的原始消息片段（GapDetector 提取） |
+| `summary` | `string` | 召回结果摘要文字 |
+| `sources` | `CardSource[]` | 召回来源列表（名称 + 跳转链接，≤3 条） |
+| `buttons?` | `CardButton[]` | 可选操作按钮（如"展开详情"） |
 
 ## 红线
 

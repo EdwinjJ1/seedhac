@@ -22,18 +22,19 @@
 
 ## 卡片格式（CardBuilder template: `qa`）
 
-| 字段 | 说明 |
-|------|------|
-| `question` | 用户原始问题（脱敏后） |
-| `answer` | LLM 生成的回答正文 |
-| `sources` | 引用来源列表（文档名 + 跳转链接，≤5 条） |
-| `confidence` | 高 / 中 / 低（LLM 自评） |
+对应合约类型 `QaCardInput`（`packages/contracts/src/card.ts`）：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `question` | `string` | 用户原始问题 |
+| `answer` | `string` | LLM 生成的回答正文 |
+| `sources` | `CardSource[]` | 引用来源列表（名称 + 跳转链接，≤5 条） |
+| `buttons?` | `CardButton[]` | 可选操作按钮（如"查看原文"） |
 
 ## 红线
 
 - 检索无结果时不捏造答案，必须明确回复"未找到相关记录"
 - 不跨群读取历史记录
-- confidence=低 时需在卡片上标注"仅供参考"
 
 ## Memory 写入
 
