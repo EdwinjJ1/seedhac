@@ -13,6 +13,34 @@ import type { Result } from './result.js';
 /** 4 张核心表 — 与 docs/技术栈与可复用能力.md 第四节对齐 */
 export type BitableTableKind = 'memory' | 'decision' | 'todo' | 'knowledge';
 
+/**
+ * Memory 表行的强类型 schema（M2 引入）。
+ * MemoryStore 写入时按此结构校验，读取时按此类型反序列化。
+ */
+export type MemoryKind = 'project' | 'chat' | 'user' | 'skill_log';
+
+export interface MemoryRecord {
+  readonly id?: string;
+  readonly kind: MemoryKind;
+  readonly chat_id: string;
+  readonly user_id?: string;
+  readonly key: string;
+  readonly content: string;
+  readonly importance: number;
+  readonly last_access: number;
+  readonly created_at: number;
+  readonly source_skill: string;
+}
+
+/** 写入时的输入：id / created_at / last_access / importance 由 store 自动管理 */
+export type MemoryWriteInput = Pick<
+  MemoryRecord,
+  'kind' | 'chat_id' | 'key' | 'content' | 'source_skill'
+> & {
+  readonly user_id?: string;
+  readonly importance?: number;
+};
+
 /** 通用行：开发期用 Record，后续按 TableKind 收紧到具体类型 */
 export type BitableRow = Record<string, unknown>;
 
@@ -77,6 +105,4 @@ export interface BitableClient {
   update(params: UpdateParams): Promise<Result<void>>;
   delete(params: DeleteParams): Promise<Result<void>>;
   link(params: LinkParams): Promise<Result<void>>;
-  /** 读取任意多维表格的记录，返回可供 LLM 消费的纯文本摘要 */
-  readTable(appToken: string, tableId: string, maxRows?: number): Promise<Result<string>>;
 }
