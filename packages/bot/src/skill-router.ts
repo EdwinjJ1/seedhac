@@ -33,7 +33,7 @@ interface RouteRule {
 
 /** 规则表，按优先级从高到低排列 */
 const RULES: readonly RouteRule[] = [
-  // ── qa：唯一需要 @bot ─────────────────────────────────────────────
+  // ── qa 高优先级：@bot + 疑问词，优先于被动意图 ───────────────────
   {
     intent: 'qa',
     requireMention: true,
@@ -118,6 +118,13 @@ const RULES: readonly RouteRule[] = [
       /项目背景/,
       /项目目标/,
     ],
+  },
+
+  // ── qa：兜底，@bot 且其他意图都不匹配时响应 ─────────────────────
+  {
+    intent: 'qa',
+    requireMention: true,
+    patterns: [/.+/],
   },
 ];
 
