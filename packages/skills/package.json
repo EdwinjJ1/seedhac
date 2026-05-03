@@ -12,14 +12,20 @@
       "default": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run src",
     "clean": "rm -rf dist .tsbuildinfo"
   },
   "dependencies": {
     "@seedhac/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.5"
   }
 }

@@ -11,7 +11,7 @@
 
 import type { BitableClient } from './bitable.js';
 import type { BotRuntime } from './bot-runtime.js';
-import type { Card } from './card.js';
+import type { Card, CardBuilder } from './card.js';
 import type { LLMClient } from './llm.js';
 import type { BotEvent } from './message.js';
 import type { Retriever } from './retriever.js';
@@ -26,8 +26,8 @@ export type SkillName =
   | 'slides'
   | 'archive'
   | 'weekly'
-  | 'requirementDoc'  // 被动监听需求描述 → 生成结构化飞书文档
-  | 'docIterate';     // 持续监听对话 → 增量更新已有需求文档
+  | 'requirementDoc' // 被动监听需求描述 → 生成结构化飞书文档
+  | 'docIterate'; // 持续监听对话 → 增量更新已有需求文档
 
 /** 触发条件描述（声明式，便于在 docs / debug UI 上展示） */
 export interface TriggerSpec {
@@ -61,6 +61,7 @@ export interface SkillContext {
   readonly retrievers: Readonly<Record<string, Retriever>>;
   readonly logger: Logger;
   readonly docx: DocxClient;
+  readonly cardBuilder: CardBuilder;
 }
 
 /** Skill 副作用：写 Bitable / 调外部 webhook / 触发其他 skill 等 */

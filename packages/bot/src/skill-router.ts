@@ -132,6 +132,7 @@ export class SkillRouter {
   constructor(private readonly botOpenId: string) {}
 
   private mentionsBot(msg: Message): boolean {
+    if (!this.botOpenId) return false;
     return msg.mentions.some((m) => m.user.userId === this.botOpenId);
   }
 
