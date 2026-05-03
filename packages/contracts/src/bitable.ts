@@ -105,4 +105,6 @@ export interface BitableClient {
   update(params: UpdateParams): Promise<Result<void>>;
   delete(params: DeleteParams): Promise<Result<void>>;
   link(params: LinkParams): Promise<Result<void>>;
+  /** 读取任意多维表格内容并序列化为字符串（qa skill 用于读取群聊中链接的外部 Bitable） */
+  readTable(appToken: string, tableId: string, maxRows?: number): Promise<Result<string>>;
 }
