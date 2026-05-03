@@ -11,25 +11,25 @@ import { handleEvent } from './wiring.js';
 
 const logger: Logger = {
   debug: (msg, meta) => console.debug(`[bot] ${msg}`, meta ?? ''),
-  info:  (msg, meta) => console.info(`[bot] ${msg}`, meta ?? ''),
-  warn:  (msg, meta) => console.warn(`[bot] ${msg}`, meta ?? ''),
+  info: (msg, meta) => console.info(`[bot] ${msg}`, meta ?? ''),
+  warn: (msg, meta) => console.warn(`[bot] ${msg}`, meta ?? ''),
   error: (msg, meta) => console.error(`[bot] ${msg}`, meta ?? ''),
 };
 
 function buildDeps() {
-  const appId     = process.env['LARK_APP_ID'];
+  const appId = process.env['LARK_APP_ID'];
   const appSecret = process.env['LARK_APP_SECRET'];
-  if (!appId)     throw new Error('Missing env var: LARK_APP_ID');
+  if (!appId) throw new Error('Missing env var: LARK_APP_ID');
   if (!appSecret) throw new Error('Missing env var: LARK_APP_SECRET');
 
   const runtime = createBotRuntime();
-  const router  = new SkillRouter(process.env['LARK_BOT_OPEN_ID'] ?? '');
+  const router = new SkillRouter(process.env['LARK_BOT_OPEN_ID'] ?? '');
 
   const llm = new VolcanoLLMClient({
-    apiKey:   process.env['ARK_API_KEY'] ?? '',
+    apiKey: process.env['ARK_API_KEY'] ?? '',
     modelIds: {
       lite: process.env['ARK_MODEL_LITE'] ?? '',
-      pro:  process.env['ARK_MODEL_PRO']  ?? '',
+      pro: process.env['ARK_MODEL_PRO'] ?? '',
     },
   });
 
@@ -38,26 +38,37 @@ function buildDeps() {
     appSecret,
     appToken: process.env['BITABLE_APP_TOKEN'] ?? '',
     tableIds: {
-      memory:    process.env['BITABLE_TABLE_MEMORY']    ?? '',
-      decision:  process.env['BITABLE_TABLE_DECISION']  ?? '',
-      todo:      process.env['BITABLE_TABLE_TODO']      ?? '',
+      memory: process.env['BITABLE_TABLE_MEMORY'] ?? '',
+      decision: process.env['BITABLE_TABLE_DECISION'] ?? '',
+      todo: process.env['BITABLE_TABLE_TODO'] ?? '',
       knowledge: process.env['BITABLE_TABLE_KNOWLEDGE'] ?? '',
     },
   });
 
-  return { runtime, router, llm, bitable };
+  const docx = createDocxClient();
+
+  return { runtime, router, llm, bitable, docx };
 }
 
 async function main(): Promise<void> {
   logger.info('booting');
 
-  const { runtime, router, llm, bitable } = buildDeps();
+  const { runtime, router, llm, bitable, docx } = buildDeps();
 
   runtime.on(async (event) => {
     if (event.type === 'message') {
       const msg = event.payload;
       const intent = router.route(msg);
-      logger.info(`message received: text="${msg.text}" mentions=${JSON.stringify(msg.mentions.map(m => m.user.userId))} → intent=${intent}`);
+      logger.info(
+        `message received: text="${msg.text}" mentions=${JSON.stringify(msg.mentions.map((m) => m.user.userId))} → intent=${intent}`,
+      );
+    }
+    if (event.type === 'cardAction') {
+      logger.info('card action received', {
+        chatId: event.payload.chatId,
+        messageId: event.payload.messageId,
+        value: event.payload.value,
+      });
     }
 
     const ctx: SkillContext = {
@@ -65,6 +76,8 @@ async function main(): Promise<void> {
       runtime,
       llm,
       bitable,
+      docx,
+      cardBuilder: larkCardBuilder,
       retrievers: {},
       logger,
       docx: createDocxClient(),
@@ -87,7 +100,7 @@ async function main(): Promise<void> {
     void runtime.stop();
     process.exit(0);
   };
-  process.on('SIGINT',  () => shutdown('SIGINT'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
 }
 

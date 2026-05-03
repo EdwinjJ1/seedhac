@@ -32,9 +32,12 @@ export type CardTemplateName =
 export interface CardSource {
   readonly title: string;
   readonly url?: string;
-  /** 来源类型：飞书 Wiki / Bitable / 群历史消息 / 妙记 / Web ... */
-  readonly kind: 'wiki' | 'bitable' | 'chat' | 'minutes' | 'web' | 'other';
+  /** 来源类型：飞书文档 / Wiki / Bitable / 群历史消息 / 妙记 / Web ... */
+  readonly kind: 'doc' | 'wiki' | 'slides' | 'bitable' | 'chat' | 'minutes' | 'web' | 'other';
   readonly snippet?: string;
+  readonly authorName?: string;
+  readonly timestamp?: number;
+  readonly messageId?: string;
 }
 
 export interface CardButton {

@@ -1,22 +1,77 @@
 /**
- * 🅴 archive — 复盘归档
+ * archive — 项目全链路归档
  *
- * 触发：@bot 复盘 / @bot 归档
- * 数据流：拉群历史 → LLM 抽取决策 / 数据 / 待办 → 写 Bitable
- *         （含双向关联字段，作为知识图谱节点）
+ * 触发：群里出现"复盘 / 归档 / 项目结束 / 收尾"（被动监听，无需 @bot）
+ * 数据流：并行拉 Bitable 全量数据 → LLM 生成归档摘要 → archive 卡片
+ *
+ * 注意：docx 创建依赖 #32 DocxClient，尚未 merge，当前跳过该步骤。
  */
 
-import type { Skill } from '@seedhac/contracts';
-import { ErrorCode, err, makeError } from '@seedhac/contracts';
+import {
+  type Skill,
+  type SkillContext,
+  type SkillResult,
+  type Result,
+  ok,
+  err,
+  ErrorCode,
+  makeError,
+} from '@seedhac/contracts';
+import { ARCHIVE_PROMPT } from './prompts/archive.js';
+
+const TRIGGER_RE = /复盘|归档|项目结束|收尾/i;
 
 export const archiveSkill: Skill = {
   name: 'archive',
   trigger: {
     events: ['message'],
-    requireMention: true,
-    keywords: ['复盘', '归档'],
-    description: '@bot 复盘 → 抽取决策/数据/待办 → 写 Bitable + 知识图谱',
+    requireMention: false,
+    keywords: ['复盘', '归档', '项目结束', '收尾'],
+    description: '检测到项目结束信号时打包归档所有成果',
   },
-  match: () => false,
-  run: async () => err(makeError(ErrorCode.SKILL_NOT_IMPLEMENTED, 'archive skill not implemented')),
+
+  match(ctx: SkillContext): boolean {
+    if (ctx.event.type !== 'message') return false;
+    return TRIGGER_RE.test(ctx.event.payload.text);
+  },
+
+  async run(ctx: SkillContext): Promise<Result<SkillResult>> {
+    if (ctx.event.type !== 'message') {
+      return err(makeError(ErrorCode.INVALID_INPUT, 'archive only handles message events'));
+    }
+    const { chatId } = ctx.event.payload;
+
+    const filter = `AND(CurrentValue.[chatId]="${chatId}")`;
+
+    // 并行拉三张表
+    const [memoryRes, decisionRes, todoRes] = await Promise.all([
+      ctx.bitable.find({ table: 'memory', filter, pageSize: 100 }),
+      ctx.bitable.find({ table: 'decision', filter, pageSize: 100 }),
+      ctx.bitable.find({ table: 'todo', filter, pageSize: 100 }),
+    ]);
+
+    const memories = memoryRes.ok ? memoryRes.value.records : [];
+    const decisions = decisionRes.ok ? decisionRes.value.records : [];
+    const todos = todoRes.ok ? todoRes.value.records : [];
+
+    // LLM 生成摘要
+    const llmResult = await ctx.llm.ask(ARCHIVE_PROMPT(memories, decisions, todos), { model: 'pro' });
+    if (!llmResult.ok) return err(llmResult.error);
+
+    const summaryText = llmResult.value.trim();
+    const recordId = `archive_${chatId}_${Date.now()}`;
+
+    const card = ctx.cardBuilder.build('archive', {
+      recordId,
+      title: '项目归档',
+      bitableUrl: '',
+      tags: [],
+      summary: summaryText,
+    });
+
+    return ok({
+      card,
+      reasoning: `归档 ${decisions.length} 条决策，${todos.length} 条任务`,
+    });
+  },
 };

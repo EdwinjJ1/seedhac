@@ -226,4 +226,35 @@ describe('LarkBotRuntime', () => {
 
     expect(handler).not.toHaveBeenCalled();
   });
+
+  it('card action event triggers handler with action payload', async () => {
+    const runtime = makeRuntime();
+    const handler: EventHandler = vi.fn();
+    runtime.on(handler);
+    await runtime.start();
+
+    const registeredHandlers = mockRegister.mock.calls[0]![0] as Record<
+      string,
+      (data: unknown) => Promise<unknown>
+    >;
+    const actionHandler = registeredHandlers['card.action.trigger']!;
+
+    await actionHandler({
+      context: { open_message_id: 'om_card1', open_chat_id: 'oc_chat1' },
+      operator: { open_id: 'ou_user1', name: '张三' },
+      action: {
+        tag: 'button',
+        value: { action: 'qa.reanswer', questionMessageId: 'msg_1' },
+      },
+    });
+
+    expect(handler).toHaveBeenCalledOnce();
+    const event = (handler as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(event.type).toBe('cardAction');
+    expect(event.payload.chatId).toBe('oc_chat1');
+    expect(event.payload.messageId).toBe('om_card1');
+    expect(event.payload.user.userId).toBe('ou_user1');
+    expect(event.payload.value).toEqual({ action: 'qa.reanswer', questionMessageId: 'msg_1' });
+    await expect(actionHandler({})).resolves.toBeUndefined();
+  });
 });

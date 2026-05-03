@@ -2,6 +2,7 @@ import * as lark from '@larksuiteoapi/node-sdk';
 import {
   type BotRuntime,
   type BotEvent,
+  type CardAction,
   type EventHandler,
   type SendTextParams,
   type SendCardParams,
@@ -125,7 +126,9 @@ function parseMessage(data: Record<string, unknown>): Message {
     chatType: (msg.chat_type as string | undefined) === 'p2p' ? 'p2p' : 'group',
     sender: {
       userId: (senderId.open_id as string | undefined) ?? '',
-      ...((senderId.union_id as string | undefined) !== undefined && { unionId: senderId.union_id as string }),
+      ...((senderId.union_id as string | undefined) !== undefined && {
+        unionId: senderId.union_id as string,
+      }),
     },
     contentType: parseMsgType(msgType),
     text,
@@ -133,6 +136,38 @@ function parseMessage(data: Record<string, unknown>): Message {
     mentions,
     ...(replyTo !== undefined && { replyTo }),
     timestamp: Number(tsRaw),
+  };
+}
+
+function parseCardAction(data: Record<string, unknown>): CardAction {
+  const context = (data.context ?? {}) as Record<string, unknown>;
+  const action = (data.action ?? {}) as Record<string, unknown>;
+  const operator = (data.operator ?? {}) as Record<string, unknown>;
+  const value = (action.value ?? {}) as Record<string, unknown>;
+  const formValue = data.form_value as Record<string, unknown> | undefined;
+
+  return {
+    chatId:
+      (context.open_chat_id as string | undefined) ??
+      (data.open_chat_id as string | undefined) ??
+      (data.chat_id as string | undefined) ??
+      '',
+    messageId:
+      (context.open_message_id as string | undefined) ??
+      (data.open_message_id as string | undefined) ??
+      (data.message_id as string | undefined) ??
+      '',
+    user: {
+      userId:
+        (operator.open_id as string | undefined) ?? (data.open_id as string | undefined) ?? '',
+      ...((operator.union_id as string | undefined) !== undefined && {
+        unionId: operator.union_id as string,
+      }),
+      ...((operator.name as string | undefined) !== undefined && { name: operator.name as string }),
+    },
+    value,
+    ...(formValue !== undefined && { formValue }),
+    timestamp: Date.now(),
   };
 }
 
@@ -146,13 +181,15 @@ export class LarkBotRuntime implements BotRuntime {
   /** patchCard 节流：messageId → 上次 patch 完成的时间 */
   private readonly patchTimes = new Map<string, number>();
 
-  constructor(private readonly env: {
-    appId: string;
-    appSecret: string;
-    verificationToken?: string;
-    encryptKey?: string;
-    logLevel?: lark.LoggerLevel;
-  }) {
+  constructor(
+    private readonly env: {
+      appId: string;
+      appSecret: string;
+      verificationToken?: string;
+      encryptKey?: string;
+      logLevel?: lark.LoggerLevel;
+    },
+  ) {
     this.client = new lark.Client({
       appId: env.appId,
       appSecret: env.appSecret,
@@ -166,7 +203,9 @@ export class LarkBotRuntime implements BotRuntime {
 
   on(handler: EventHandler): () => void {
     this.handlers.add(handler);
-    return () => { this.handlers.delete(handler); };
+    return () => {
+      this.handlers.delete(handler);
+    };
   }
 
   private emit(event: BotEvent): void {
@@ -198,14 +237,16 @@ export class LarkBotRuntime implements BotRuntime {
               chatId: (d.chat_id as string | undefined) ?? '',
               inviter: {
                 userId: (operatorId.open_id as string | undefined) ?? '',
-                ...((operatorId.union_id as string | undefined) !== undefined && { unionId: operatorId.union_id as string }),
+                ...((operatorId.union_id as string | undefined) !== undefined && {
+                  unionId: operatorId.union_id as string,
+                }),
               },
               timestamp: Date.now(),
             },
           });
           return { code: 0 };
         },
-        'p2p_chat_create': async (data) => {
+        p2p_chat_create: async (data) => {
           const d = data as unknown as Record<string, unknown>;
           const userId = (d.open_id as string | undefined) ?? '';
           this.emit({
@@ -217,6 +258,11 @@ export class LarkBotRuntime implements BotRuntime {
             },
           });
           return { code: 0 };
+        },
+        'card.action.trigger': async (data: unknown) => {
+          const action = parseCardAction(data as unknown as Record<string, unknown>);
+          this.emit({ type: 'cardAction', payload: action });
+          return undefined;
         },
       });
 
@@ -317,17 +363,19 @@ export class LarkBotRuntime implements BotRuntime {
   async fetchHistory(params: FetchHistoryParams): Promise<Result<FetchHistoryResult>> {
     await this.limiter.acquire();
     try {
-      const res = await (this.client.im.message as unknown as {
-        list: (p: unknown) => Promise<{
-          code?: number;
-          msg?: string;
-          data?: {
-            has_more?: boolean;
-            page_token?: string;
-            items?: Array<Record<string, unknown>>;
-          };
-        }>;
-      }).list({
+      const res = await (
+        this.client.im.message as unknown as {
+          list: (p: unknown) => Promise<{
+            code?: number;
+            msg?: string;
+            data?: {
+              has_more?: boolean;
+              page_token?: string;
+              items?: Array<Record<string, unknown>>;
+            };
+          }>;
+        }
+      ).list({
         params: {
           container_id: params.chatId,
           container_id_type: 'chat',
@@ -353,7 +401,7 @@ export class LarkBotRuntime implements BotRuntime {
             message_id: item.message_id,
             chat_id: item.chat_id,
             chat_type: item.chat_type,
-            message_type: (item.message_type ?? item.msg_type),
+            message_type: item.message_type ?? item.msg_type,
             content: item.body ? (item.body as Record<string, unknown>).content : item.content,
             create_time: item.create_time,
             mentions: item.mentions ?? [],
@@ -401,6 +449,7 @@ export function createBotRuntime(): LarkBotRuntime {
     appSecret,
     verificationToken: process.env['LARK_VERIFICATION_TOKEN'] ?? '',
     encryptKey: process.env['LARK_ENCRYPT_KEY'] ?? '',
-    logLevel: logLevelMap[(process.env['LARK_LOG_LEVEL'] ?? 'info').toLowerCase()] ?? lark.LoggerLevel.info,
+    logLevel:
+      logLevelMap[(process.env['LARK_LOG_LEVEL'] ?? 'info').toLowerCase()] ?? lark.LoggerLevel.info,
   });
 }
