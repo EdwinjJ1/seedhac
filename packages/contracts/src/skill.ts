@@ -1,5 +1,5 @@
 /**
- * Skill 抽象 — 7 条业务主线（qa / recall / summary / slides / archive / crossChat / weekly）
+ * Skill 抽象 — 6 条业务主线（qa / recall / summary / slides / archive / weekly）
  * 各实现一个 Skill。
  *
  * Router 流程：
@@ -18,7 +18,7 @@ import type { Retriever } from './retriever.js';
 import type { Result } from './result.js';
 
 /** 7 条主线对应的稳定字符串 ID */
-export type SkillName = 'qa' | 'recall' | 'summary' | 'slides' | 'archive' | 'crossChat' | 'weekly';
+export type SkillName = 'qa' | 'recall' | 'summary' | 'slides' | 'archive' | 'weekly';
 
 /** 触发条件描述（声明式，便于在 docs / debug UI 上展示） */
 export interface TriggerSpec {

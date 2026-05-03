@@ -2,7 +2,7 @@
  * VectorRetriever — 实现 Retriever 接口，Chroma 语义召回 + LLM 精排。
  *
  * source = 'vector'
- * chatId 为空时做全局搜索（crossChat 场景）
+ * chatId 为空时做全局搜索
  */
 
 import {
