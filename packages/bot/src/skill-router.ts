@@ -92,14 +92,14 @@ const RULES: readonly RouteRule[] = [
   // ── meetingNotes：会议纪要进群（被动）────────────────────────────
   {
     intent: 'meetingNotes',
-    requiresMention: false,
+    requireMention: false,
     patterns: [/会议纪要/, /妙记/, /会议总结/, /本次会议/, /会议结论/],
   },
 
   // ── slides：需要做 PPT 汇报（被动）──────────────────────────────
   {
     intent: 'slides',
-    requiresMention: false,
+    requireMention: false,
     patterns: [/ppt/i, /幻灯片/, /演示文稿/, /向上级汇报/, /给老板汇报/, /做个演示/],
   },
 
