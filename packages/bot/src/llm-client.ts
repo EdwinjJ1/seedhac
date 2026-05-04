@@ -14,12 +14,12 @@ import {
   type LLMClient,
   type ChatMessage,
   type AskOptions,
-  type ChatWithToolsOptions,
-  type ChatWithToolsResult,
-  type LLMTool,
-  type ToolCall,
   type SchemaLike,
   type Result,
+  type ToolCall,
+  type ToolResult,
+  type ChatWithToolsOptions,
+  type ChatWithToolsResult,
   ok,
   err,
   ErrorCode,
@@ -39,7 +39,7 @@ export interface LLMConfig {
 
 // ---------- Internal types ----------
 
-interface ArkToolCall {
+interface ArkToolCallWire {
   id: string;
   type: 'function';
   function: { name: string; arguments: string };
@@ -47,8 +47,9 @@ interface ArkToolCall {
 
 interface ArkMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
-  content: string | null;
-  tool_calls?: ArkToolCall[];
+  /** assistant + tool_calls 时可省略，让严格 provider 接受 null/缺失语义 */
+  content?: string;
+  tool_calls?: ArkToolCallWire[];
   tool_call_id?: string;
   name?: string;
 }
@@ -57,13 +58,21 @@ interface ArkResponse {
   choices: Array<{
     message: {
       content: string | null;
-      tool_calls?: ArkToolCall[];
+      tool_calls?: ArkToolCallWire[];
     };
+    finish_reason?: string;
   }>;
   usage?: {
     prompt_tokens: number;
     completion_tokens: number;
   };
+}
+
+interface ArkRawResult {
+  content: string;
+  toolCalls: ToolCall[];
+  promptTokens: number;
+  completionTokens: number;
 }
 
 type ArkToolChoice = 'auto' | 'none' | { type: 'function'; function: { name: string } };
@@ -73,6 +82,7 @@ type ArkToolChoice = 'auto' | 'none' | { type: 'function'; function: { name: str
 const DEFAULT_TIMEOUT_MS = 30_000;
 const RETRY_DELAYS_MS = [1000, 2000, 4000] as const;
 const DEFAULT_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3';
+const DEFAULT_MAX_TOOL_CALL_ROUNDS = 5;
 
 // ---------- Utilities ----------
 
@@ -86,6 +96,32 @@ function stripCodeFence(raw: string): string {
   return match ? match[1]!.trim() : raw.trim();
 }
 
+function toArkMessage(m: ChatMessage): ArkMessage {
+  // H1/L2: 当 assistant 消息只调工具不说话时，content === ''。
+  // OpenAI / Claude 等严格 provider 期望 content === null（Ark 容忍空串）。
+  // 这里对 assistant 做特殊处理：有 toolCalls + content 为空 → 省略 content；
+  // 其他场景保持 content 字段，避免破坏现有调用。
+  const hasToolCalls = m.role === 'assistant' && !!m.toolCalls && m.toolCalls.length > 0;
+  const omitContent = hasToolCalls && m.content === '';
+
+  const base: ArkMessage = omitContent
+    ? ({ role: m.role } as ArkMessage)
+    : { role: m.role, content: m.content };
+
+  if (hasToolCalls) {
+    base.tool_calls = m.toolCalls!.map((tc) => ({
+      id: tc.id,
+      type: 'function',
+      function: { name: tc.name, arguments: tc.argumentsRaw },
+    }));
+  }
+  if (m.role === 'tool') {
+    if (m.toolCallId !== undefined) base.tool_call_id = m.toolCallId;
+    if (m.name !== undefined) base.name = m.name;
+  }
+  return base;
+}
+
 function logCall(params: {
   model: string;
   promptTokens: number;
@@ -97,9 +133,9 @@ function logCall(params: {
   );
 }
 
-function toArkToolChoice(toolChoice: AskOptions['toolChoice']): ArkToolChoice | undefined {
-  if (toolChoice === undefined) return undefined;
-  if (toolChoice === 'auto' || toolChoice === 'none') return toolChoice;
+function toArkToolChoice(toolChoice: AskOptions['toolChoice']): ArkToolChoice {
+  if (toolChoice === undefined || toolChoice === 'auto') return 'auto';
+  if (toolChoice === 'none') return 'none';
   return { type: 'function', function: { name: toolChoice } };
 }
 
@@ -125,14 +161,7 @@ export class VolcanoLLMClient implements LLMClient {
   private async callApi(
     messages: ArkMessage[],
     opts: AskOptions = {},
-  ): Promise<
-    Result<{
-      content: string;
-      rawToolCalls?: ArkToolCall[];
-      promptTokens: number;
-      completionTokens: number;
-    }>
-  > {
+  ): Promise<Result<ArkRawResult>> {
     const modelId = this.modelId(opts.model ?? 'pro');
     const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
@@ -141,16 +170,24 @@ export class VolcanoLLMClient implements LLMClient {
       messages,
       ...(opts.maxTokens !== undefined && { max_tokens: opts.maxTokens }),
       ...(opts.temperature !== undefined && { temperature: opts.temperature }),
-      ...(opts.tools !== undefined && {
-        tools: opts.tools.map((t: LLMTool) => ({
-          type: 'function',
-          function: { name: t.name, description: t.description, parameters: t.parameters },
-        })),
-      }),
-      ...(opts.toolChoice !== undefined && { tool_choice: toArkToolChoice(opts.toolChoice) }),
+      ...(opts.tools &&
+        opts.tools.length > 0 && {
+          tools: opts.tools.map((t) => ({
+            type: 'function',
+            function: {
+              name: t.name,
+              description: t.description,
+              parameters: t.parameters,
+            },
+          })),
+          tool_choice: toArkToolChoice(opts.toolChoice),
+        }),
     });
 
     let lastErr: unknown;
+    // H2: 跨 attempt 跟踪是否出现过 AbortError，否则最后一次非 timeout 错误会
+    // 把"前面其实是 timeout"的信息掩盖成 LLM_INVALID_RESPONSE，影响调用方降级策略
+    let sawTimeout = false;
 
     for (let attempt = 0; attempt < 3; attempt++) {
       const startMs = Date.now();
@@ -176,9 +213,14 @@ export class VolcanoLLMClient implements LLMClient {
         }
 
         const data = (await resp.json()) as ArkResponse;
-        const msg = data.choices[0]?.message;
-        const content = msg?.content ?? '';
-        const rawToolCalls = msg?.tool_calls;
+        const choiceMessage = data.choices[0]?.message;
+        const content = choiceMessage?.content ?? '';
+        const toolCallsWire = choiceMessage?.tool_calls ?? [];
+        const toolCalls: ToolCall[] = toolCallsWire.map((tc) => ({
+          id: tc.id,
+          name: tc.function.name,
+          argumentsRaw: tc.function.arguments,
+        }));
         const promptTokens = data.usage?.prompt_tokens ?? 0;
         const completionTokens = data.usage?.completion_tokens ?? 0;
 
@@ -189,25 +231,20 @@ export class VolcanoLLMClient implements LLMClient {
           durationMs: Date.now() - startMs,
         });
 
-        return ok({
-          content,
-          ...(rawToolCalls !== undefined && { rawToolCalls }),
-          promptTokens,
-          completionTokens,
-        });
+        return ok({ content, toolCalls, promptTokens, completionTokens });
       } catch (e) {
         clearTimeout(timer);
         lastErr = e;
+        if (e instanceof Error && e.name === 'AbortError') sawTimeout = true;
         if (attempt < 2) await sleep(RETRY_DELAYS_MS[attempt] ?? 1000);
       }
     }
 
-    const isTimeout = lastErr instanceof Error && lastErr.name === 'AbortError';
     return err(
       makeError(
-        isTimeout ? ErrorCode.LLM_TIMEOUT : ErrorCode.LLM_INVALID_RESPONSE,
-        isTimeout
-          ? 'LLM request timed out after 3 attempts'
+        sawTimeout ? ErrorCode.LLM_TIMEOUT : ErrorCode.LLM_INVALID_RESPONSE,
+        sawTimeout
+          ? 'LLM request timed out (at least once) across 3 attempts'
           : 'LLM request failed after 3 attempts',
         lastErr,
       ),
@@ -227,10 +264,88 @@ export class VolcanoLLMClient implements LLMClient {
   }
 
   async chat(messages: readonly ChatMessage[], opts?: AskOptions): Promise<Result<string>> {
-    const arkMessages: ArkMessage[] = messages.map(chatMessageToArk);
+    const arkMessages: ArkMessage[] = messages.map(toArkMessage);
     const result = await this.callApi(arkMessages, opts);
     if (!result.ok) return result;
     return ok(result.value.content);
+  }
+
+  async chatWithTools(
+    messages: readonly ChatMessage[],
+    opts: ChatWithToolsOptions,
+  ): Promise<Result<ChatWithToolsResult>> {
+    if (!opts.tools || opts.tools.length === 0) {
+      return err(
+        makeError(ErrorCode.INVALID_INPUT, 'chatWithTools requires opts.tools to be non-empty'),
+      );
+    }
+    const maxRounds = Math.max(1, opts.maxToolCallRounds ?? DEFAULT_MAX_TOOL_CALL_ROUNDS);
+    const conversation: ArkMessage[] = messages.map(toArkMessage);
+    const allToolCalls: ToolCall[] = [];
+
+    let lastContent = '';
+    let rounds = 0;
+
+    for (let round = 0; round < maxRounds; round++) {
+      rounds = round + 1;
+
+      const apiResult = await this.callApi(conversation, opts);
+      if (!apiResult.ok) return apiResult;
+
+      const { content, toolCalls } = apiResult.value;
+      lastContent = content;
+
+      if (toolCalls.length === 0) {
+        // 模型不再请求工具：完成
+        return ok({ content, toolCalls: allToolCalls, rounds });
+      }
+
+      // 记录 + 把 assistant(toolCalls) 追加到对话历史
+      // H1: 同时返回 content + tool_calls 的情况（"我先查一下天气" + tool_call），
+      // 仅在 content 非空时回填，避免空串混入对话历史
+      allToolCalls.push(...toolCalls);
+      const assistantMsg: ArkMessage = {
+        role: 'assistant',
+        ...(content && { content }),
+        tool_calls: toolCalls.map((tc) => ({
+          id: tc.id,
+          type: 'function',
+          function: { name: tc.name, arguments: tc.argumentsRaw },
+        })),
+      };
+      conversation.push(assistantMsg);
+
+      // 串行执行 tool（避免 BitableClient QPS 风暴），错误隔离到单条 ToolResult
+      for (const call of toolCalls) {
+        let result: ToolResult;
+        const callStartMs = Date.now();
+        try {
+          result = await opts.executor(call);
+        } catch (e) {
+          result = {
+            toolCallId: call.id,
+            name: call.name,
+            content: JSON.stringify({
+              error: e instanceof Error ? e.message : String(e),
+            }),
+          };
+        }
+        console.log(
+          `[LLMClient] tool=${call.name} call_id=${call.id} duration=${Date.now() - callStartMs}ms`,
+        );
+        conversation.push({
+          role: 'tool',
+          tool_call_id: result.toolCallId,
+          name: result.name,
+          content: result.content,
+        });
+      }
+      // 进入下一轮：把 tool 结果回灌给模型
+    }
+
+    // 达到 maxRounds 仍有 tool_calls 未处理完 → 返回最后一次 content + 历史
+    console.warn(`[LLMClient] chatWithTools hit maxRounds=${maxRounds}, returning last content`);
+    return ok({ content: lastContent, toolCalls: allToolCalls, rounds });
   }
 
   async askStructured<T>(
@@ -283,77 +398,6 @@ export class VolcanoLLMClient implements LLMClient {
       }
     }
   }
-
-  async chatWithTools(
-    messages: readonly ChatMessage[],
-    opts: ChatWithToolsOptions,
-  ): Promise<Result<ChatWithToolsResult>> {
-    const maxRounds = opts.maxToolCallRounds ?? 5;
-    const allToolCalls: ToolCall[] = [];
-    const history: ArkMessage[] = messages.map(chatMessageToArk);
-    let lastContent = '';
-
-    for (let round = 0; round < maxRounds; round++) {
-      const result = await this.callApi(history, opts);
-      if (!result.ok) return result;
-
-      const { content, rawToolCalls } = result.value;
-      lastContent = content;
-
-      if (!rawToolCalls || rawToolCalls.length === 0) {
-        return ok({ content, toolCalls: allToolCalls, rounds: round + 1 });
-      }
-
-      // 把 assistant 的 tool_calls 消息追加进历史
-      history.push({ role: 'assistant', content, tool_calls: rawToolCalls });
-
-      // 执行每个 tool call；executor 抛错时隔离为 error ToolResult 回灌模型
-      for (const raw of rawToolCalls) {
-        const toolCall: ToolCall = {
-          id: raw.id,
-          name: raw.function.name,
-          argumentsRaw: raw.function.arguments,
-        };
-        allToolCalls.push(toolCall);
-
-        let toolContent: string;
-        try {
-          const toolResult = await opts.executor(toolCall);
-          toolContent = toolResult.content;
-        } catch (e) {
-          toolContent = JSON.stringify({
-            error: e instanceof Error ? e.message : 'executor threw unexpectedly',
-          });
-        }
-
-        history.push({
-          role: 'tool',
-          content: toolContent,
-          tool_call_id: raw.id,
-          name: raw.function.name,
-        });
-      }
-    }
-
-    // 达到轮数上限：返回最后一次 content，调用方决定如何处理
-    return ok({ content: lastContent, toolCalls: allToolCalls, rounds: maxRounds });
-  }
-}
-
-// ---------- 工具函数 ----------
-
-function chatMessageToArk(m: ChatMessage): ArkMessage {
-  const base: ArkMessage = { role: m.role, content: m.content };
-  if (m.toolCalls && m.toolCalls.length > 0) {
-    base.tool_calls = m.toolCalls.map((tc) => ({
-      id: tc.id,
-      type: 'function',
-      function: { name: tc.name, arguments: tc.argumentsRaw },
-    }));
-  }
-  if (m.toolCallId !== undefined) base.tool_call_id = m.toolCallId;
-  if (m.name !== undefined) base.name = m.name;
-  return base;
 }
 
 // ---------- 工厂函数（从环境变量读取配置）----------

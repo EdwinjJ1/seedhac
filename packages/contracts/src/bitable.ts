@@ -44,6 +44,46 @@ export type MemoryWriteInput = Pick<
 /** 通用行：开发期用 Record，后续按 TableKind 收紧到具体类型 */
 export type BitableRow = Record<string, unknown>;
 
+/**
+ * Memory 表行的强类型 schema（M2 引入）。
+ * MemoryStore 写入时按此结构校验，读取时按此类型反序列化。
+ *
+ * 字段说明：
+ *   - kind         记忆类型，配合 chat_id/user_id/key 组合定位
+ *   - chat_id      所属群（'GLOBAL' 表示全局/项目级记忆）
+ *   - user_id      可选，user/skill_log 类记忆需要
+ *   - key          幂等键，同 (chat_id, kind, key) 视为同一条（write 触发 upsert）
+ *   - content      正文，写入时硬截断至 MEMORY_MAX_CONTENT_BYTES
+ *   - importance   重要性 0-10，由 LLM Lite 异步打分；未评分前为 -1
+ *   - last_access  毫秒时间戳，read/search 命中时刷新（驱动 LRU recency）
+ *   - created_at   毫秒时间戳，写入时一次性写入
+ *   - source_skill 写入此条记忆的 skill 名（审计用）
+ */
+export type MemoryKind = 'project' | 'chat' | 'user' | 'skill_log';
+
+export interface MemoryRecord {
+  readonly id?: string;
+  readonly kind: MemoryKind;
+  readonly chat_id: string;
+  readonly user_id?: string;
+  readonly key: string;
+  readonly content: string;
+  readonly importance: number;
+  readonly last_access: number;
+  readonly created_at: number;
+  readonly source_skill: string;
+}
+
+/** 写入时的输入：id / created_at / last_access / importance 由 store 自动管理 */
+export type MemoryWriteInput = Pick<
+  MemoryRecord,
+  'kind' | 'chat_id' | 'key' | 'content' | 'source_skill'
+> & {
+  readonly user_id?: string;
+  /** 可选：调用方主动指定重要性，跳过 LLM 评分 */
+  readonly importance?: number;
+};
+
 /** 一条记录的稳定主键（飞书侧的 record_id） */
 export interface RecordRef {
   readonly tableId: string;
