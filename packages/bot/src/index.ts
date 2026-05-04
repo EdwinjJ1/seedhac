@@ -69,7 +69,8 @@ async function main(): Promise<void> {
   const docsRoot = process.env['BOT_DOCS_ROOT'] ?? DEFAULT_DOCS_ROOT;
   const promptCache = await SystemPromptCache.load(docsRoot);
   const memoryStore = new NullMemoryStore(); // M2 合并后替换为真实 MemoryStore
-  const harness = { promptCache, memoryStore, docsRoot };
+  const botOpenId = process.env['LARK_BOT_OPEN_ID'] ?? '';
+  const harness = { promptCache, memoryStore, docsRoot, botOpenId };
 
   logger.info('harness loaded', { docsRoot });
 

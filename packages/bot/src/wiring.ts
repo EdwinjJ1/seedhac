@@ -16,6 +16,8 @@ export interface HarnessConfig {
   readonly promptCache: SystemPromptCache;
   readonly memoryStore: MemoryStore;
   readonly docsRoot: string;
+  /** 机器人自身的 open_id，用于判断消息是否 @bot */
+  readonly botOpenId: string;
 }
 
 export async function handleEvent(
@@ -32,7 +34,7 @@ export async function handleEvent(
   if (event.type !== 'message') return;
 
   const msg = event.payload;
-  const isMention = msg.mentions.length > 0;
+  const isMention = msg.mentions.some((m) => m.user.userId === harness?.botOpenId);
 
   // @mention 消息走 Harness：chatWithTools 让模型按需调 memory/skill 工具
   if (harness && isMention) {
