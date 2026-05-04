@@ -16,6 +16,7 @@ import type { MemoryKind } from '@seedhac/contracts';
 import { skills } from '@seedhac/skills';
 
 import type { MemoryStore } from './memory-store.js';
+import { truncateToBytes } from './text-utils.js';
 
 // ─── 工具描述（JSON Schema 子集）────────────────────────────────────────────────
 
@@ -38,15 +39,14 @@ const TOOLS: readonly LLMTool[] = [
   },
   {
     name: 'memory.search',
-    description: '在指定群组记忆中按关键词模糊检索，返回最相关的若干条记录',
+    description: '在当前群组记忆中按关键词模糊检索，返回最相关的若干条记录',
     parameters: {
       type: 'object',
       properties: {
-        chat_id: { type: 'string', description: '群组 ID' },
         query: { type: 'string', description: '检索关键词或自然语言描述' },
         limit: { type: 'number', minimum: 1, maximum: 10, description: '返回条数，默认 5' },
       },
-      required: ['chat_id', 'query'],
+      required: ['query'],
     },
   },
   {
@@ -164,7 +164,7 @@ async function handleMemorySearch(
   args: Record<string, unknown>,
   deps: ExecutorDeps,
 ): Promise<string> {
-  const chatId = String(args['chat_id'] ?? deps.chatId);
+  const chatId = deps.chatId; // 不信任 LLM 传入的 chat_id，强制用会话上下文（R2）
   const query = String(args['query'] ?? '');
   const limit = typeof args['limit'] === 'number' ? Math.min(args['limit'], 10) : 5;
 
@@ -205,10 +205,6 @@ async function handleSkillRead(
     return JSON.stringify({ error: `skill "${name}" document not found` });
   }
 
-  // 控制在 2KB 内，避免撑爆上下文
-  const bytes = new TextEncoder().encode(content);
-  if (bytes.length <= MAX_SKILL_DOC_BYTES) return content;
-
-  const truncated = new TextDecoder().decode(bytes.slice(0, MAX_SKILL_DOC_BYTES));
-  return `${truncated}\n…[truncated]`;
+  // 控制在 2KB 内，避免撑爆上下文；truncateToBytes 保证不撕裂多字节字符
+  return truncateToBytes(content, MAX_SKILL_DOC_BYTES);
 }

@@ -102,6 +102,16 @@ describe('memory.search', () => {
     expect(store.search).toHaveBeenCalledWith(CHAT_ID, 'sprint', { limit: 3 });
   });
 
+  it('R2: LLM 传入不同 chat_id 时强制使用 deps.chatId（不泄露其他群数据）', async () => {
+    const store = makeStore();
+    const exec = makeExecutor({ store, chatId: CHAT_ID, logger: mockLogger, docsRoot: DOCS_ROOT });
+
+    await exec(makeCall('memory.search', { chat_id: 'oc_attacker_group', query: 'secret' }));
+
+    // 无论 LLM 传什么 chat_id，store.search 必须收到 deps.chatId
+    expect(store.search).toHaveBeenCalledWith(CHAT_ID, 'secret', expect.anything());
+  });
+
   it('error case: store returns err → content has error field', async () => {
     const store = makeStore({
       search: vi.fn().mockResolvedValue(err(makeError(ErrorCode.FEISHU_API_ERROR, 'timeout'))),
@@ -109,7 +119,7 @@ describe('memory.search', () => {
     const exec = makeExecutor({ store, chatId: CHAT_ID, logger: mockLogger, docsRoot: DOCS_ROOT });
 
     const toolResult = await exec(
-      makeCall('memory.search', { chat_id: CHAT_ID, query: 'foo' }),
+      makeCall('memory.search', { query: 'foo' }),
     );
 
     const data = JSON.parse(toolResult.content) as { error: string };

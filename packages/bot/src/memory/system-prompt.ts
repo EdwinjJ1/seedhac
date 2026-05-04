@@ -14,6 +14,8 @@ import { resolve } from 'node:path';
 
 import { skills } from '@seedhac/skills';
 
+import { truncateToBytes } from './text-utils.js';
+
 // ─── 工具一句话摘要（与 tool-handlers.ts 的 TOOLS 保持同步）───────────────────
 
 const TOOL_LINES = [
@@ -91,21 +93,3 @@ async function readFirstLine(filePath: string): Promise<string> {
   }
 }
 
-const TRUNCATE_SUFFIX = '\n…[truncated]';
-const TRUNCATE_SUFFIX_BYTES = new TextEncoder().encode(TRUNCATE_SUFFIX).length;
-
-function truncateToBytes(s: string, maxBytes: number): string {
-  const bytes = new TextEncoder().encode(s);
-  if (bytes.length <= maxBytes) return s;
-  // 预留后缀字节，回退至合法 UTF-8 边界
-  const cutTarget = maxBytes - TRUNCATE_SUFFIX_BYTES;
-  const strict = new TextDecoder('utf-8', { fatal: true });
-  for (let cut = cutTarget; cut >= cutTarget - 3 && cut >= 0; cut--) {
-    try {
-      return strict.decode(bytes.slice(0, cut)) + TRUNCATE_SUFFIX;
-    } catch {
-      // 切到多字节字符中间，继续回退
-    }
-  }
-  return s.slice(0, cutTarget) + TRUNCATE_SUFFIX;
-}
