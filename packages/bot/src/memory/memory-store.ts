@@ -141,6 +141,7 @@ export class MemoryStore {
   /** 把用户提供的 search query 收敛到安全字符 + 长度上限（不允许逃逸 filter 表达式） */
   private sanitizeQuery(raw: string): string {
     // 去掉控制字符 + 反斜杠 + 双引号；超过上限则截断
+    // eslint-disable-next-line no-control-regex
     const cleaned = raw.replace(/[\x00-\x1f"\\]/g, ' ').trim();
     return cleaned.slice(0, MEMORY_MAX_QUERY_LENGTH);
   }
