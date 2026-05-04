@@ -6,6 +6,7 @@
  */
 
 import type { MemoryKind, MemoryRecord, Result } from '@seedhac/contracts';
+import { ok } from '@seedhac/contracts';
 
 export interface MemoryStore {
   read(kind: MemoryKind, chatId: string, key: string): Promise<Result<MemoryRecord | null>>;
@@ -14,4 +15,18 @@ export interface MemoryStore {
     query: string,
     opts?: { limit?: number; kind?: MemoryKind },
   ): Promise<Result<readonly MemoryRecord[]>>;
+}
+
+/**
+ * 空实现：M2 合并前的占位符。
+ * read 始终返回 null（未命中），search 始终返回空列表。
+ * 生产路径不会因此崩溃，只是记忆功能暂时不生效。
+ */
+export class NullMemoryStore implements MemoryStore {
+  async read(): Promise<Result<null>> {
+    return ok(null);
+  }
+  async search(): Promise<Result<readonly MemoryRecord[]>> {
+    return ok([]);
+  }
 }

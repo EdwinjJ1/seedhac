@@ -291,12 +291,14 @@ export class VolcanoLLMClient implements LLMClient {
     const maxRounds = opts.maxToolCallRounds ?? 5;
     const allToolCalls: ToolCall[] = [];
     const history: ArkMessage[] = messages.map(chatMessageToArk);
+    let lastContent = '';
 
     for (let round = 0; round < maxRounds; round++) {
       const result = await this.callApi(history, opts);
       if (!result.ok) return result;
 
       const { content, rawToolCalls } = result.value;
+      lastContent = content;
 
       if (!rawToolCalls || rawToolCalls.length === 0) {
         return ok({ content, toolCalls: allToolCalls, rounds: round + 1 });
@@ -305,7 +307,7 @@ export class VolcanoLLMClient implements LLMClient {
       // 把 assistant 的 tool_calls 消息追加进历史
       history.push({ role: 'assistant', content, tool_calls: rawToolCalls });
 
-      // 把每个 tool call 转成 ToolCall，执行，再把结果追加进历史
+      // 执行每个 tool call；executor 抛错时隔离为 error ToolResult 回灌模型
       for (const raw of rawToolCalls) {
         const toolCall: ToolCall = {
           id: raw.id,
@@ -314,18 +316,27 @@ export class VolcanoLLMClient implements LLMClient {
         };
         allToolCalls.push(toolCall);
 
-        const toolResult = await opts.executor(toolCall);
+        let toolContent: string;
+        try {
+          const toolResult = await opts.executor(toolCall);
+          toolContent = toolResult.content;
+        } catch (e) {
+          toolContent = JSON.stringify({
+            error: e instanceof Error ? e.message : 'executor threw unexpectedly',
+          });
+        }
+
         history.push({
           role: 'tool',
-          content: toolResult.content,
+          content: toolContent,
           tool_call_id: raw.id,
           name: raw.function.name,
         });
       }
     }
 
-    // 达到轮数上限：返回当前状态，调用方决定如何处理
-    return ok({ content: '', toolCalls: allToolCalls, rounds: maxRounds });
+    // 达到轮数上限：返回最后一次 content，调用方决定如何处理
+    return ok({ content: lastContent, toolCalls: allToolCalls, rounds: maxRounds });
   }
 }
 
