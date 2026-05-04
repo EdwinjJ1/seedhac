@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { ok, err, makeError, ErrorCode } from '@seedhac/contracts';
 import type { ToolCall } from '@seedhac/contracts';
 import { getLLMTools, makeExecutor } from '../../memory/tool-handlers.js';
@@ -118,9 +118,7 @@ describe('memory.search', () => {
     });
     const exec = makeExecutor({ store, chatId: CHAT_ID, logger: mockLogger, docsRoot: DOCS_ROOT });
 
-    const toolResult = await exec(
-      makeCall('memory.search', { query: 'foo' }),
-    );
+    const toolResult = await exec(makeCall('memory.search', { query: 'foo' }));
 
     const data = JSON.parse(toolResult.content) as { error: string };
     expect(data.error).toContain('timeout');
@@ -136,7 +134,9 @@ describe('skill.list', () => {
 
     const toolResult = await exec(makeCall('skill.list', {}));
 
-    const data = JSON.parse(toolResult.content) as { skills: { name: string; description: string }[] };
+    const data = JSON.parse(toolResult.content) as {
+      skills: { name: string; description: string }[];
+    };
     expect(Array.isArray(data.skills)).toBe(true);
     expect(data.skills.length).toBeGreaterThan(0);
     for (const s of data.skills) {

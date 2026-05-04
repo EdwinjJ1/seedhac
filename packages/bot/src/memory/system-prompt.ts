@@ -92,4 +92,3 @@ async function readFirstLine(filePath: string): Promise<string> {
     return '';
   }
 }
-
