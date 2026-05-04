@@ -23,14 +23,16 @@ Lark Loom 是飞书群聊 AI 助手。Bot 的核心差异化在于**事中主动
 
 ## 工具索引（模型可调用）
 
-| 工具 | 作用 |
-|------|------|
-| `memory.read` | 按 chatId + 关键词查 Bitable memory 表 |
-| `skill.read` | 获取指定 Skill 的行为规范文档（本目录下 `skills/*.md`） |
-| `bitable.find` | 通用多维表格查询 |
-| `bitable.insert` | 写入 memory / decision / todo / knowledge 表 |
-| `retriever.search` | 向量检索（Chroma）或 Bitable 全文检索 |
-| `docx.read` | 读取飞书文档正文（Wiki / 云文档） |
+M3 注册的 4 个工具（`packages/bot/src/memory/tool-handlers.ts`）：
+
+| 工具 | 签名 | 作用 |
+|------|------|------|
+| `memory.read` | `memory.read(kind, key)` | 按 (kind, key) 精确读取当前群的一条记忆 |
+| `memory.search` | `memory.search(query, limit?)` | 按关键词模糊检索当前群的记忆，返回若干条 |
+| `skill.list` | `skill.list()` | 列出所有已注册 Skill 的名称与一句话描述 |
+| `skill.read` | `skill.read(name)` | 获取指定 Skill 的完整行为规范文档（本目录 `skills/*.md`，≤ 2KB） |
+
+> `chat_id` 由服务端从会话上下文注入，模型无需传入（R2：不允许跨群读取）。
 
 ---
 
