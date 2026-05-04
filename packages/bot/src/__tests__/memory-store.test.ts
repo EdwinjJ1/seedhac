@@ -98,6 +98,10 @@ class FakeBitable implements BitableClient {
     return ok(undefined);
   }
 
+  async readTable(_appToken: string, _tableId: string, _maxRows?: number): Promise<Result<string>> {
+    return ok('');
+  }
+
   // ---- 测试辅助 ----
   size(): number {
     return this.rows.length;
