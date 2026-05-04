@@ -19,10 +19,10 @@ import { truncateToBytes } from './text-utils.js';
 // ─── 工具一句话摘要（与 tool-handlers.ts 的 TOOLS 保持同步）───────────────────
 
 const TOOL_LINES = [
-  'memory.read(kind, key)   — 精确读取一条记忆',
-  'memory.search(chat_id, query, limit?) — 关键词模糊检索记忆',
-  'skill.list()             — 列出所有 Skill 名称与描述',
-  'skill.read(name)         — 获取指定 Skill 的完整文档',
+  'memory.read(kind, key)       — 精确读取当前群的一条记忆',
+  'memory.search(query, limit?) — 关键词模糊检索当前群的记忆',
+  'skill.list()                 — 列出所有 Skill 名称与描述',
+  'skill.read(name)             — 获取指定 Skill 的完整文档',
 ];
 
 // ─── 缓存 ───────────────────────────────────────────────────────────────────────
