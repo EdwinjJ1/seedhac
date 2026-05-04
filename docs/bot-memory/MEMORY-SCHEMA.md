@@ -6,19 +6,20 @@
 
 ## memory 表
 
-每次 Skill 成功执行后写入一条记录，供后续 `memory.read` 检索。
+语义化记忆存储，字段对应 `MemoryRecord`（`packages/contracts/src/bitable.ts`）。
+由 `MemoryStore.write()` 写入，由 `memory.read` / `memory.search` 工具读取。
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `chatId` | 文本 | 飞书群 chat_id |
-| `skillName` | 单选 | qa / recall / summary / slides / archive / weekly |
-| `triggeredAt` | 日期时间 | 触发时间（ISO 8601） |
-| `messageId` | 文本 | 触发消息的 message_id |
-| `query` | 文本 | 用户原始意图（GapDetector 提取或原文） |
-| `reasoning` | 长文本 | Skill 决策原因（SkillResult.reasoning） |
-| `resultSummary` | 长文本 | 输出卡片的摘要文字（≤200 字） |
-| `relatedDecisions` | 关联字段 | → decision 表（知识图谱边） |
-| `relatedTodos` | 关联字段 | → todo 表（知识图谱边） |
+| `kind` | 单选 | `project` / `chat` / `user` / `skill_log` |
+| `chat_id` | 文本 | 飞书群 chat_id；全局/项目级记忆用 `'GLOBAL'` |
+| `user_id` | 文本 | 可选，`user` / `skill_log` 类记忆需要 |
+| `key` | 文本 | 幂等键；`(chat_id, kind, key)` 相同视为同一条（触发 upsert） |
+| `content` | 长文本 | 正文，写入时硬截断至 2KB |
+| `importance` | 数字 | 重要性 0–10；由 LLM 异步评分，未评分前为 `-1` |
+| `last_access` | 数字 | 毫秒时间戳；read/search 命中时刷新，驱动 LRU recency |
+| `created_at` | 数字 | 毫秒时间戳；写入时一次性写入，不可修改 |
+| `source_skill` | 文本 | 写入该条记忆的 Skill 名（审计用） |
 
 ---
 
@@ -75,4 +76,4 @@
 - `batchInsert` 须满足原子性：全部成功或全部回滚（对应红线 R4）
 - 单批上限 500 条（飞书硬上限）
 - 所有写操作通过 `BitableClient` 接口，禁止直接调飞书 REST API
-- `chatId` 作为行级数据隔离边界，不允许跨群查询
+- `chat_id` 作为行级数据隔离边界，不允许跨群查询（对应红线 R2）
