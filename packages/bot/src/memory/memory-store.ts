@@ -381,16 +381,16 @@ export class MemoryStore {
         });
         continue;
       }
-      try {
-        await this.bitable.update({
-          table: MEMORY_TABLE,
-          recordId: item.recordId,
-          patch: { importance: scoreResult.value },
-        });
-      } catch (e) {
+      const updateResult = await this.bitable.update({
+        table: MEMORY_TABLE,
+        recordId: item.recordId,
+        patch: { importance: scoreResult.value },
+      });
+      if (!updateResult.ok) {
         this.logger?.warn('memory: write back importance failed', {
           recordId: item.recordId,
-          error: e instanceof Error ? e.message : String(e),
+          code: updateResult.error.code,
+          message: updateResult.error.message,
         });
       }
     }
@@ -408,11 +408,12 @@ export class MemoryStore {
   }
 
   private async touchAccess(recordId: string): Promise<void> {
-    await this.bitable.update({
+    const result = await this.bitable.update({
       table: MEMORY_TABLE,
       recordId,
       patch: { last_access: this.now() },
     });
+    if (!result.ok) throw new Error(result.error.message);
   }
 
   /** 容量护栏：当前 chat+kind > 200 → 淘汰最低分；全表 > 2000 → 全表淘汰最低分 */
