@@ -66,6 +66,8 @@ interface ArkResponse {
   };
 }
 
+type ArkToolChoice = 'auto' | 'none' | { type: 'function'; function: { name: string } };
+
 // ---------- Constants ----------
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -93,6 +95,12 @@ function logCall(params: {
   console.log(
     `[LLMClient] model=${params.model} prompt_tokens=${params.promptTokens} completion_tokens=${params.completionTokens} duration=${params.durationMs}ms`,
   );
+}
+
+function toArkToolChoice(toolChoice: AskOptions['toolChoice']): ArkToolChoice | undefined {
+  if (toolChoice === undefined) return undefined;
+  if (toolChoice === 'auto' || toolChoice === 'none') return toolChoice;
+  return { type: 'function', function: { name: toolChoice } };
 }
 
 // ---------- Implementation ----------
@@ -139,7 +147,7 @@ export class VolcanoLLMClient implements LLMClient {
           function: { name: t.name, description: t.description, parameters: t.parameters },
         })),
       }),
-      ...(opts.toolChoice !== undefined && { tool_choice: opts.toolChoice }),
+      ...(opts.toolChoice !== undefined && { tool_choice: toArkToolChoice(opts.toolChoice) }),
     });
 
     let lastErr: unknown;
