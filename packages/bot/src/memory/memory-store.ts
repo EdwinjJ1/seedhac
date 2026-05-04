@@ -16,11 +16,13 @@
 
 import {
   type BitableClient,
+  type BitableRow,
   type LLMClient,
   type Logger,
   type MemoryRecord,
   type MemoryKind,
   type MemoryWriteInput,
+  type RecordRef,
   type Result,
   ok,
   err,
@@ -414,7 +416,7 @@ export class MemoryStore {
 
   /** 容量护栏：当前 chat+kind > 200 → 淘汰最低分；全表 > 2000 → 全表淘汰最低分 */
   private async enforceCapacity(kind: MemoryKind, chatId: string): Promise<void> {
-    // 单 chat+kind 计数（fetch 一页 200，超 200 就触发）
+    // 单 chat+kind 计数（飞书上限 500 > 200，一页够用）
     const perChatResult = await this.bitable.find({
       table: MEMORY_TABLE,
       filter: this.buildFilter({ kind, chat_id: chatId }),
@@ -424,14 +426,33 @@ export class MemoryStore {
       await this.evictLowest(perChatResult.value.records.map((r) => this.rowToMemory(r)), 1);
     }
 
-    // 全表计数
-    const totalResult = await this.bitable.find({
-      table: MEMORY_TABLE,
-      pageSize: MEMORY_MAX_TOTAL + 1,
-    });
-    if (totalResult.ok && totalResult.value.records.length > MEMORY_MAX_TOTAL) {
-      await this.evictLowest(totalResult.value.records.map((r) => this.rowToMemory(r)), 1);
+    // 全表计数：MEMORY_MAX_TOTAL=2000 > 飞书单页上限 500，必须分页累计
+    const allResult = await this.fetchAllRecords();
+    if (allResult.ok && allResult.value.length > MEMORY_MAX_TOTAL) {
+      const excess = allResult.value.length - MEMORY_MAX_TOTAL;
+      await this.evictLowest(allResult.value.map((r) => this.rowToMemory(r)), excess);
     }
+  }
+
+  /** 分页拉取全表记录（每页 ≤ 500，符合飞书硬上限） */
+  private async fetchAllRecords(): Promise<Result<readonly (BitableRow & RecordRef)[]>> {
+    const PAGE_SIZE = 500;
+    const all: (BitableRow & RecordRef)[] = [];
+    let pageToken: string | undefined;
+
+    for (;;) {
+      const result = await this.bitable.find({
+        table: MEMORY_TABLE,
+        pageSize: PAGE_SIZE,
+        ...(pageToken !== undefined && { pageToken }),
+      });
+      if (!result.ok) return result;
+      for (const r of result.value.records) all.push(r);
+      if (!result.value.hasMore) break;
+      pageToken = result.value.nextPageToken;
+    }
+
+    return ok(all);
   }
 
   private async evictLowest(candidates: readonly MemoryRecord[], n: number): Promise<void> {

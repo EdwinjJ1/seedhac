@@ -47,16 +47,20 @@ class FakeBitable implements BitableClient {
     table: string;
     filter?: string;
     pageSize?: number;
-  }): Promise<Result<{ records: readonly (Record<string, unknown> & { tableId: string; recordId: string })[]; hasMore: boolean }>> {
+    pageToken?: string;
+  }): Promise<Result<{ records: readonly (Record<string, unknown> & { tableId: string; recordId: string })[]; hasMore: boolean; nextPageToken?: string }>> {
     this.findCalls++;
     const matched = this.rows.filter((r) => this.matchesFilter(r, params.filter ?? ''));
     const limit = params.pageSize ?? 20;
-    const records = matched.slice(0, limit).map((r) => ({
+    const offset = params.pageToken !== undefined ? parseInt(params.pageToken, 10) : 0;
+    const records = matched.slice(offset, offset + limit).map((r) => ({
       ...r.fields,
       tableId: 'tbl_memory',
       recordId: r.recordId,
     }));
-    return ok({ records, hasMore: matched.length > limit });
+    const hasMore = offset + limit < matched.length;
+    const nextPageToken = hasMore ? String(offset + limit) : undefined;
+    return ok({ records, hasMore, ...(nextPageToken !== undefined && { nextPageToken }) });
   }
 
   async insert(params: {
