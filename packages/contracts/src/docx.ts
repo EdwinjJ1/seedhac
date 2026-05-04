@@ -17,4 +17,6 @@ export interface DocxClient {
   getShareLink(docToken: string): Promise<Result<string>>;
   /** 解析 markdown，调 create + appendBlocks，一步完成 */
   createFromMarkdown(title: string, markdown: string): Promise<Result<DocRef>>;
+  /** 读取文档 / wiki / 幻灯片的纯文本内容 */
+  readContent(token: string, kind?: 'doc' | 'wiki' | 'slides'): Promise<Result<string>>;
 }

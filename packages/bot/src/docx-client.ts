@@ -91,7 +91,9 @@ export class LarkDocxClient implements DocxClient {
       });
 
       if (res.code !== 0) {
-        return err(makeError(ErrorCode.FEISHU_API_ERROR, `set share permission failed: ${res.msg}`));
+        return err(
+          makeError(ErrorCode.FEISHU_API_ERROR, `set share permission failed: ${res.msg}`),
+        );
       }
 
       return ok(`https://feishu.cn/docx/${docToken}`);
@@ -99,6 +101,109 @@ export class LarkDocxClient implements DocxClient {
       const msg = e instanceof Error ? e.message : String(e);
       return err(makeError(ErrorCode.FEISHU_API_ERROR, `get share link error: ${msg}`));
     }
+  }
+
+  private async readDocxRawContent(token: string): Promise<Result<string>> {
+    try {
+      const res = await (
+        this.client.docx.v1.document as unknown as {
+          rawContent: (
+            p: unknown,
+          ) => Promise<{ code?: number; msg?: string; data?: { content?: string } }>;
+        }
+      ).rawContent({
+        path: { document_id: token },
+        params: { lang: 0 },
+      });
+      if (res.code !== 0) {
+        return err(makeError(ErrorCode.FEISHU_API_ERROR, `readContent failed: ${res.msg}`));
+      }
+      return ok(res.data?.content ?? '');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return err(makeError(ErrorCode.FEISHU_API_ERROR, `readContent error: ${msg}`, e));
+    }
+  }
+
+  private async resolveWikiNode(token: string): Promise<
+    Result<{
+      objToken: string;
+      objType: 'doc' | 'docx' | 'sheet' | 'mindnote' | 'bitable' | 'file' | 'slides';
+      title?: string;
+    }>
+  > {
+    try {
+      const res = await this.client.wiki.v2.space.getNode({
+        params: { token, obj_type: 'wiki' },
+      });
+      if (res.code !== 0) {
+        return err(makeError(ErrorCode.FEISHU_API_ERROR, `resolve wiki failed: ${res.msg}`));
+      }
+      const node = res.data?.node;
+      if (!node?.obj_token || !node.obj_type) {
+        return err(makeError(ErrorCode.FEISHU_API_ERROR, 'resolve wiki failed: empty node'));
+      }
+      return ok({
+        objToken: node.obj_token,
+        objType: node.obj_type,
+        ...(node.title ? { title: node.title } : {}),
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return err(makeError(ErrorCode.FEISHU_API_ERROR, `resolve wiki error: ${msg}`, e));
+    }
+  }
+
+  private async readDriveTitle(
+    token: string,
+    kind: 'doc' | 'docx' | 'wiki' | 'slides',
+  ): Promise<Result<string>> {
+    try {
+      const res = await this.client.drive.v1.meta.batchQuery({
+        data: {
+          request_docs: [{ doc_token: token, doc_type: kind }],
+          with_url: true,
+        },
+      });
+      if (res.code !== 0) {
+        return err(makeError(ErrorCode.FEISHU_API_ERROR, `read meta failed: ${res.msg}`));
+      }
+      const title = res.data?.metas?.[0]?.title;
+      return ok(title ? `标题：${title}` : '');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return err(makeError(ErrorCode.FEISHU_API_ERROR, `read meta error: ${msg}`, e));
+    }
+  }
+
+  async readContent(
+    token: string,
+    kind: 'doc' | 'wiki' | 'slides' = 'doc',
+  ): Promise<Result<string>> {
+    if (kind === 'wiki') {
+      const node = await this.resolveWikiNode(token);
+      if (!node.ok) return node;
+      if (node.value.objType === 'doc' || node.value.objType === 'docx') {
+        const raw = await this.readDocxRawContent(node.value.objToken);
+        if (!raw.ok) return raw;
+        const title = node.value.title ? `标题：${node.value.title}\n` : '';
+        return ok(`${title}${raw.value}`);
+      }
+      if (node.value.objType === 'slides') {
+        const title = node.value.title ? `标题：${node.value.title}` : '';
+        if (title) return ok(title);
+        return this.readDriveTitle(node.value.objToken, 'slides');
+      }
+      return ok(node.value.title ? `标题：${node.value.title}` : '');
+    }
+
+    if (kind === 'slides') {
+      const title = await this.readDriveTitle(token, 'slides');
+      if (title.ok && title.value.trim()) return title;
+      return this.readDocxRawContent(token);
+    }
+
+    return this.readDocxRawContent(token);
   }
 
   async createFromMarkdown(title: string, markdown: string): Promise<Result<DocRef>> {

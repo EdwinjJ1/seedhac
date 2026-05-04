@@ -75,6 +75,8 @@ interface ArkRawResult {
   completionTokens: number;
 }
 
+type ArkToolChoice = 'auto' | 'none' | { type: 'function'; function: { name: string } };
+
 // ---------- Constants ----------
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -131,6 +133,12 @@ function logCall(params: {
   );
 }
 
+function toArkToolChoice(toolChoice: AskOptions['toolChoice']): ArkToolChoice {
+  if (toolChoice === undefined || toolChoice === 'auto') return 'auto';
+  if (toolChoice === 'none') return 'none';
+  return { type: 'function', function: { name: toolChoice } };
+}
+
 // ---------- Implementation ----------
 
 export class VolcanoLLMClient implements LLMClient {
@@ -162,17 +170,18 @@ export class VolcanoLLMClient implements LLMClient {
       messages,
       ...(opts.maxTokens !== undefined && { max_tokens: opts.maxTokens }),
       ...(opts.temperature !== undefined && { temperature: opts.temperature }),
-      ...(opts.tools && opts.tools.length > 0 && {
-        tools: opts.tools.map((t) => ({
-          type: 'function',
-          function: {
-            name: t.name,
-            description: t.description,
-            parameters: t.parameters,
-          },
-        })),
-        tool_choice: opts.toolChoice ?? 'auto',
-      }),
+      ...(opts.tools &&
+        opts.tools.length > 0 && {
+          tools: opts.tools.map((t) => ({
+            type: 'function',
+            function: {
+              name: t.name,
+              description: t.description,
+              parameters: t.parameters,
+            },
+          })),
+          tool_choice: toArkToolChoice(opts.toolChoice),
+        }),
     });
 
     let lastErr: unknown;
@@ -267,10 +276,7 @@ export class VolcanoLLMClient implements LLMClient {
   ): Promise<Result<ChatWithToolsResult>> {
     if (!opts.tools || opts.tools.length === 0) {
       return err(
-        makeError(
-          ErrorCode.INVALID_INPUT,
-          'chatWithTools requires opts.tools to be non-empty',
-        ),
+        makeError(ErrorCode.INVALID_INPUT, 'chatWithTools requires opts.tools to be non-empty'),
       );
     }
     const maxRounds = Math.max(1, opts.maxToolCallRounds ?? DEFAULT_MAX_TOOL_CALL_ROUNDS);
@@ -338,9 +344,7 @@ export class VolcanoLLMClient implements LLMClient {
     }
 
     // 达到 maxRounds 仍有 tool_calls 未处理完 → 返回最后一次 content + 历史
-    console.warn(
-      `[LLMClient] chatWithTools hit maxRounds=${maxRounds}, returning last content`,
-    );
+    console.warn(`[LLMClient] chatWithTools hit maxRounds=${maxRounds}, returning last content`);
     return ok({ content: lastContent, toolCalls: allToolCalls, rounds });
   }
 

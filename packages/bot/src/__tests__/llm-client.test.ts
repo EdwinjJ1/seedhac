@@ -349,10 +349,10 @@ describe('VolcanoLLMClient.chatWithTools', () => {
   });
 
   it('rejects when tools is empty', async () => {
-    const result = await makeClient().chatWithTools(
-      [{ role: 'user', content: 'hi' }],
-      { tools: [], executor: async () => ({ toolCallId: 'x', name: 'x', content: '{}' }) },
-    );
+    const result = await makeClient().chatWithTools([{ role: 'user', content: 'hi' }], {
+      tools: [],
+      executor: async () => ({ toolCallId: 'x', name: 'x', content: '{}' }),
+    });
     expect(result.ok).toBe(false);
   });
 
@@ -388,14 +388,11 @@ describe('VolcanoLLMClient.chatWithTools', () => {
 
   it('passes tools and tool_choice in API request', async () => {
     mockFetchOk('done');
-    await makeClient().chatWithTools(
-      [{ role: 'user', content: 'hi' }],
-      {
-        tools: TOOLS,
-        toolChoice: 'auto',
-        executor: async () => ({ toolCallId: 'x', name: 'x', content: '{}' }),
-      },
-    );
+    await makeClient().chatWithTools([{ role: 'user', content: 'hi' }], {
+      tools: TOOLS,
+      toolChoice: 'auto',
+      executor: async () => ({ toolCallId: 'x', name: 'x', content: '{}' }),
+    });
     const body = JSON.parse((vi.mocked(fetch).mock.calls[0]![1] as RequestInit).body as string);
     expect(body.tools).toHaveLength(1);
     expect(body.tools[0]).toEqual({
@@ -409,6 +406,21 @@ describe('VolcanoLLMClient.chatWithTools', () => {
     expect(body.tool_choice).toBe('auto');
   });
 
+  it('converts a concrete toolChoice name to OpenAI-compatible function choice', async () => {
+    mockFetchOk('done');
+    await makeClient().chatWithTools([{ role: 'user', content: 'hi' }], {
+      tools: TOOLS,
+      toolChoice: 'get_weather',
+      executor: async () => ({ toolCallId: 'x', name: 'x', content: '{}' }),
+    });
+
+    const body = JSON.parse((vi.mocked(fetch).mock.calls[0]![1] as RequestInit).body as string);
+    expect(body.tool_choice).toEqual({
+      type: 'function',
+      function: { name: 'get_weather' },
+    });
+  });
+
   it('stops at maxToolCallRounds and returns last content', async () => {
     // 模型一直要求调工具，永远不收敛
     mockFetchSequence(
@@ -417,18 +429,15 @@ describe('VolcanoLLMClient.chatWithTools', () => {
       arkToolCallResponse('get_weather', { city: 'C' }, 'c3'),
     );
 
-    const result = await makeClient().chatWithTools(
-      [{ role: 'user', content: 'go' }],
-      {
-        tools: TOOLS,
-        maxToolCallRounds: 3,
-        executor: async (call) => ({
-          toolCallId: call.id,
-          name: call.name,
-          content: '{}',
-        }),
-      },
-    );
+    const result = await makeClient().chatWithTools([{ role: 'user', content: 'go' }], {
+      tools: TOOLS,
+      maxToolCallRounds: 3,
+      executor: async (call) => ({
+        toolCallId: call.id,
+        name: call.name,
+        content: '{}',
+      }),
+    });
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -448,10 +457,10 @@ describe('VolcanoLLMClient.chatWithTools', () => {
       throw new Error('upstream down');
     });
 
-    const result = await makeClient().chatWithTools(
-      [{ role: 'user', content: 'weather?' }],
-      { tools: TOOLS, executor },
-    );
+    const result = await makeClient().chatWithTools([{ role: 'user', content: 'weather?' }], {
+      tools: TOOLS,
+      executor,
+    });
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -474,8 +483,16 @@ describe('VolcanoLLMClient.chatWithTools', () => {
             message: {
               content: '',
               tool_calls: [
-                { id: 'a', type: 'function', function: { name: 'get_weather', arguments: '{"city":"A"}' } },
-                { id: 'b', type: 'function', function: { name: 'get_weather', arguments: '{"city":"B"}' } },
+                {
+                  id: 'a',
+                  type: 'function',
+                  function: { name: 'get_weather', arguments: '{"city":"A"}' },
+                },
+                {
+                  id: 'b',
+                  type: 'function',
+                  function: { name: 'get_weather', arguments: '{"city":"B"}' },
+                },
               ],
             },
             finish_reason: 'tool_calls',
@@ -494,10 +511,10 @@ describe('VolcanoLLMClient.chatWithTools', () => {
       }),
     );
 
-    const result = await makeClient().chatWithTools(
-      [{ role: 'user', content: 'A and B?' }],
-      { tools: TOOLS, executor },
-    );
+    const result = await makeClient().chatWithTools([{ role: 'user', content: 'A and B?' }], {
+      tools: TOOLS,
+      executor,
+    });
 
     expect(result.ok).toBe(true);
     expect(executor).toHaveBeenCalledTimes(2);
@@ -515,7 +532,11 @@ describe('VolcanoLLMClient.chatWithTools', () => {
             message: {
               content: '我先查一下天气',
               tool_calls: [
-                { id: 'c1', type: 'function', function: { name: 'get_weather', arguments: '{"city":"X"}' } },
+                {
+                  id: 'c1',
+                  type: 'function',
+                  function: { name: 'get_weather', arguments: '{"city":"X"}' },
+                },
               ],
             },
             finish_reason: 'tool_calls',
@@ -526,17 +547,14 @@ describe('VolcanoLLMClient.chatWithTools', () => {
       arkTextResponse('天气晴朗'),
     );
 
-    await makeClient().chatWithTools(
-      [{ role: 'user', content: 'weather?' }],
-      {
-        tools: TOOLS,
-        executor: async (call) => ({
-          toolCallId: call.id,
-          name: call.name,
-          content: '{}',
-        }),
-      },
-    );
+    await makeClient().chatWithTools([{ role: 'user', content: 'weather?' }], {
+      tools: TOOLS,
+      executor: async (call) => ({
+        toolCallId: call.id,
+        name: call.name,
+        content: '{}',
+      }),
+    });
 
     // 第二次请求里应保留第一轮的 assistant.content（不是空字符串被吞掉）
     const secondBody = JSON.parse(
@@ -556,17 +574,14 @@ describe('VolcanoLLMClient.chatWithTools', () => {
       arkTextResponse('done'),
     );
 
-    await makeClient().chatWithTools(
-      [{ role: 'user', content: 'go' }],
-      {
-        tools: TOOLS,
-        executor: async (call) => ({
-          toolCallId: call.id,
-          name: call.name,
-          content: '{}',
-        }),
-      },
-    );
+    await makeClient().chatWithTools([{ role: 'user', content: 'go' }], {
+      tools: TOOLS,
+      executor: async (call) => ({
+        toolCallId: call.id,
+        name: call.name,
+        content: '{}',
+      }),
+    });
 
     const secondBody = JSON.parse(
       (vi.mocked(fetch).mock.calls[1]![1] as RequestInit).body as string,
@@ -587,7 +602,11 @@ describe('VolcanoLLMClient.chatWithTools', () => {
             message: {
               content: '',
               tool_calls: [
-                { id: 'c1', type: 'function', function: { name: 'get_weather', arguments: '{not valid json' } },
+                {
+                  id: 'c1',
+                  type: 'function',
+                  function: { name: 'get_weather', arguments: '{not valid json' },
+                },
               ],
             },
             finish_reason: 'tool_calls',
@@ -604,10 +623,10 @@ describe('VolcanoLLMClient.chatWithTools', () => {
       return { toolCallId: call.id, name: call.name, content: '{}' };
     });
 
-    const result = await makeClient().chatWithTools(
-      [{ role: 'user', content: 'go' }],
-      { tools: TOOLS, executor },
-    );
+    const result = await makeClient().chatWithTools([{ role: 'user', content: 'go' }], {
+      tools: TOOLS,
+      executor,
+    });
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -657,17 +676,14 @@ describe('VolcanoLLMClient retry × tool round interaction', () => {
       }),
     );
 
-    const promise = makeClient().chatWithTools(
-      [{ role: 'user', content: 'weather?' }],
-      {
-        tools: TOOLS,
-        executor: async (call) => ({
-          toolCallId: call.id,
-          name: call.name,
-          content: '{"ok":true}',
-        }),
-      },
-    );
+    const promise = makeClient().chatWithTools([{ role: 'user', content: 'weather?' }], {
+      tools: TOOLS,
+      executor: async (call) => ({
+        toolCallId: call.id,
+        name: call.name,
+        content: '{"ok":true}',
+      }),
+    });
     await vi.runAllTimersAsync();
     const result = await promise;
 
