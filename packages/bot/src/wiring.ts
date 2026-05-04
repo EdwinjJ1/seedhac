@@ -2,7 +2,7 @@ import type { ChatMessage, Skill, SkillContext, SkillName } from '@seedhac/contr
 import type { Message } from '@seedhac/contracts';
 import type { RouteIntent } from './skill-router.js';
 import type { SkillRouter } from './skill-router.js';
-import type { MemoryStore } from './memory/memory-store.js';
+import type { IMemoryStore } from './memory/memory-store.js';
 import { getLLMTools, makeExecutor } from './memory/tool-handlers.js';
 import type { SystemPromptCache } from './memory/system-prompt.js';
 
@@ -14,7 +14,7 @@ export const intentToSkill: Partial<Record<RouteIntent, SkillName>> = {
 
 export interface HarnessConfig {
   readonly promptCache: SystemPromptCache;
-  readonly memoryStore: MemoryStore;
+  readonly memoryStore: IMemoryStore;
   readonly docsRoot: string;
   /** 机器人自身的 open_id，用于判断消息是否 @bot */
   readonly botOpenId: string;

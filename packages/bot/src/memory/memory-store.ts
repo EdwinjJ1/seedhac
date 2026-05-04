@@ -104,9 +104,23 @@ export function evictScore(
   return imp * 0.7 + recency * 0.3 * 10; // 把 recency 拉到 0-10 范围与 imp 匹配
 }
 
+// ---------- IMemoryStore interface ----------
+
+/** Public contract for MemoryStore — implemented by both MemoryStore and NullMemoryStore. */
+export interface IMemoryStore {
+  read(kind: MemoryKind, chatId: string, key: string): Promise<Result<MemoryRecord | null>>;
+  search(
+    chatId: string,
+    query: string,
+    opts?: { limit?: number; kind?: MemoryKind },
+  ): Promise<Result<readonly MemoryRecord[]>>;
+  write(input: MemoryWriteInput): Promise<Result<MemoryRecord>>;
+  score(content: string): Promise<Result<number>>;
+}
+
 // ---------- MemoryStore ----------
 
-export class MemoryStore {
+export class MemoryStore implements IMemoryStore {
   private readonly bitable: BitableClient;
   private readonly llm?: LLMClient;
   private readonly logger?: Logger;
@@ -518,7 +532,7 @@ export class MemoryStore {
  * 空实现：M2 合并前的占位符，或用于不需要持久化记忆的测试场景。
  * read 始终返回 null（未命中），search 始终返回空列表，write/score 返回 err。
  */
-export class NullMemoryStore {
+export class NullMemoryStore implements IMemoryStore {
   async read(): Promise<Result<MemoryRecord | null>> {
     return ok(null);
   }

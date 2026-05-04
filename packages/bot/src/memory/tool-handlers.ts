@@ -15,7 +15,7 @@ import type { LLMTool, ToolCall, ToolResult } from '@seedhac/contracts';
 import type { MemoryKind } from '@seedhac/contracts';
 import { skills } from '@seedhac/skills';
 
-import type { MemoryStore } from './memory-store.js';
+import type { IMemoryStore } from './memory-store.js';
 import { truncateToBytes } from './text-utils.js';
 
 // ─── 工具描述（JSON Schema 子集）────────────────────────────────────────────────
@@ -82,7 +82,7 @@ export interface ToolLogger {
 // ─── 工具执行器 ─────────────────────────────────────────────────────────────────
 
 export interface ExecutorDeps {
-  readonly store: MemoryStore;
+  readonly store: IMemoryStore;
   /** 当前群组 ID，memory.read 的隐式上下文 */
   readonly chatId: string;
   readonly logger: ToolLogger;
