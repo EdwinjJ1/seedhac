@@ -283,6 +283,29 @@ describe('VolcanoLLMClient', () => {
     // Should succeed on first attempt, no retry needed
     expect(fetch).toHaveBeenCalledOnce();
   });
+
+  it('chatWithTools converts a concrete toolChoice name to OpenAI-compatible function choice', async () => {
+    mockFetchOk('done');
+
+    const result = await makeClient().chatWithTools([{ role: 'user', content: 'weather?' }], {
+      tools: [
+        {
+          name: 'get_weather',
+          description: 'Get weather',
+          parameters: { type: 'object', properties: {} },
+        },
+      ],
+      toolChoice: 'get_weather',
+      executor: vi.fn(),
+    });
+
+    expect(result.ok).toBe(true);
+    const body = JSON.parse((vi.mocked(fetch).mock.calls[0]![1] as RequestInit).body as string);
+    expect(body.tool_choice).toEqual({
+      type: 'function',
+      function: { name: 'get_weather' },
+    });
+  });
 });
 
 // ---------- chatWithTools ----------

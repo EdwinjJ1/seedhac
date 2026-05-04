@@ -52,6 +52,24 @@ function toLarkFields(row: BitableRow): LarkFields {
   return row as unknown as LarkFields;
 }
 
+function escapeFieldName(fieldName: string): string {
+  return fieldName.replaceAll('\\', '\\\\').replaceAll(']', '\\]');
+}
+
+function formatFilterValue(value: unknown): string {
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  throw new Error(`unsupported where value type: ${typeof value}`);
+}
+
+function whereToFilter(where: Record<string, unknown>): string | undefined {
+  const clauses = Object.entries(where).map(
+    ([field, value]) => `CurrentValue.[${escapeFieldName(field)}]=${formatFilterValue(value)}`,
+  );
+  if (clauses.length === 0) return undefined;
+  return clauses.length === 1 ? clauses[0]! : `AND(${clauses.join(',')})`;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -132,15 +150,10 @@ export class LarkBitableClient implements BitableClient {
     const tableId = this.tid(kind);
     if (!this.config.appToken || !tableId) {
       return err(
-        makeError(
-          ErrorCode.CONFIG_MISSING,
-          `bitable ${kind} table is not configured`,
-          undefined,
-          {
-            hasAppToken: Boolean(this.config.appToken),
-            hasTableId: Boolean(tableId),
-          },
-        ),
+        makeError(ErrorCode.CONFIG_MISSING, `bitable ${kind} table is not configured`, undefined, {
+          hasAppToken: Boolean(this.config.appToken),
+          hasTableId: Boolean(tableId),
+        }),
       );
     }
     return ok({ appToken: this.config.appToken, tableId });
@@ -156,6 +169,14 @@ export class LarkBitableClient implements BitableClient {
     const configResult = this.ensureConfigured(params.table);
     if (!configResult.ok) return configResult;
     const { appToken, tableId } = configResult.value;
+    let filter = params.filter;
+    if (filter === undefined && params.where !== undefined) {
+      try {
+        filter = whereToFilter(params.where);
+      } catch (e) {
+        return err(makeError(ErrorCode.INVALID_INPUT, 'find: invalid where clause', e));
+      }
+    }
     try {
       const res = await this.call(() =>
         this.larkClient.bitable.appTableRecord.list({
@@ -163,7 +184,7 @@ export class LarkBitableClient implements BitableClient {
           params: {
             page_size: params.pageSize ?? 20,
             ...(params.pageToken !== undefined && { page_token: params.pageToken }),
-            ...(params.filter !== undefined && { filter: params.filter }),
+            ...(filter !== undefined && { filter }),
           },
         }),
       );

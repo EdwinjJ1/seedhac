@@ -99,6 +99,55 @@ describe('LarkBitableClient', () => {
     }
   });
 
+  it('find converts where into a Bitable filter expression', async () => {
+    mockList.mockResolvedValueOnce({
+      data: {
+        items: [],
+        has_more: false,
+      },
+    });
+
+    const result = await makeClient().find({
+      table: 'memory',
+      where: { chatId: 'chat_1', source: 'slides' },
+      pageSize: 3,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(mockList).toHaveBeenCalledWith(
+      expect.objectContaining({
+        params: expect.objectContaining({
+          page_size: 3,
+          filter: 'AND(CurrentValue.[chatId]="chat_1",CurrentValue.[source]="slides")',
+        }),
+      }),
+    );
+  });
+
+  it('find prefers explicit filter over where', async () => {
+    mockList.mockResolvedValueOnce({
+      data: {
+        items: [],
+        has_more: false,
+      },
+    });
+
+    const result = await makeClient().find({
+      table: 'memory',
+      where: { chatId: 'chat_1' },
+      filter: 'CurrentValue.[chat_id]="oc_real"',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(mockList).toHaveBeenCalledWith(
+      expect.objectContaining({
+        params: expect.objectContaining({
+          filter: 'CurrentValue.[chat_id]="oc_real"',
+        }),
+      }),
+    );
+  });
+
   // 4. batchInsert — splits into chunks of batchSize
   it('batchInsert calls batchCreate twice when rows exceed batchSize', async () => {
     const chunk1Records = Array.from({ length: 3 }, (_, i) => ({ record_id: `rec_${i}` }));
