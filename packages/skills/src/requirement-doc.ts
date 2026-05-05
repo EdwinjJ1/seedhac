@@ -10,6 +10,11 @@ import { ErrorCode, err, makeError } from '@seedhac/contracts';
 
 export const requirementDocSkill: Skill = {
   name: 'requirementDoc',
+  metadata: {
+    description: '把项目需求描述整理为结构化需求文档。',
+    when_to_use: '群里出现项目背景、PRD、功能需求、产品需求，且需要沉淀成文档时使用。',
+    examples: ['这是项目需求，请整理', '我们要写 PRD', '@bot 根据这段背景生成需求文档'],
+  },
   trigger: {
     events: ['message'],
     requireMention: false,
@@ -23,5 +28,10 @@ export const requirementDocSkill: Skill = {
     );
   },
   run: async () =>
-    err(makeError(ErrorCode.SKILL_NOT_IMPLEMENTED, 'requirementDoc skill not implemented — see issue #34')),
+    err(
+      makeError(
+        ErrorCode.SKILL_NOT_IMPLEMENTED,
+        'requirementDoc skill not implemented — see issue #34',
+      ),
+    ),
 };

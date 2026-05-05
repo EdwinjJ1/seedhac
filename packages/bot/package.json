@@ -12,9 +12,10 @@
     "dev": "node --env-file=../../.env --import tsx/esm src/index.ts",
     "dev:smoke": "node --env-file=../../.env --import tsx/esm src/scripts/smoke-cards.ts",
     "dev:smoke-llm": "node --env-file=../../.env --import tsx/esm src/scripts/smoke-llm.ts",
-    "dev:smoke-docx": "node --env-file=../../.env --import tsx/esm src/scripts/smoke-docx.ts",                            
+    "dev:smoke-docx": "node --env-file=../../.env --import tsx/esm src/scripts/smoke-docx.ts",
     "dev:smoke-bot-runtime": "node --env-file=../../.env --import tsx/esm src/scripts/smoke-bot-runtime.ts",
     "dev:smoke-tool-call": "node --env-file=../../.env --import tsx/esm src/scripts/smoke-tool-call.ts",
+    "smoke:harness": "node --import tsx/esm src/scripts/smoke-harness.ts",
     "start": "node --env-file=../../.env dist/index.js",
     "test": "vitest run"
   },

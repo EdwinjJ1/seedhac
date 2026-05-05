@@ -20,7 +20,10 @@ import { SUMMARY_PROMPT, EMPTY_EXTRACTION, type SummaryExtraction } from './prom
 
 const TRIGGER_RE = /会议纪要|妙记|会议总结|本次会议/i;
 
-async function extractSummary(ctx: SkillContext, chatId: string): Promise<Result<SummaryExtraction>> {
+async function extractSummary(
+  ctx: SkillContext,
+  chatId: string,
+): Promise<Result<SummaryExtraction>> {
   const histResult = await ctx.runtime.fetchHistory({ chatId, pageSize: 50 });
   if (!histResult.ok) return err(histResult.error);
 
@@ -28,7 +31,10 @@ async function extractSummary(ctx: SkillContext, chatId: string): Promise<Result
   if (!llmResult.ok) return err(llmResult.error);
 
   try {
-    const cleaned = llmResult.value.trim().replace(/```json|```/g, '').trim();
+    const cleaned = llmResult.value
+      .trim()
+      .replace(/```json|```/g, '')
+      .trim();
     const parsed = JSON.parse(cleaned) as SummaryExtraction;
     return ok({
       decisions: Array.isArray(parsed.decisions) ? parsed.decisions.map(String) : [],
@@ -49,6 +55,11 @@ async function extractSummary(ctx: SkillContext, chatId: string): Promise<Result
 
 export const summarySkill: Skill = {
   name: 'summary',
+  metadata: {
+    description: '把会议纪要或妙记内容整理为决策、行动项、问题和下一步。',
+    when_to_use: '群里出现会议纪要、妙记、会议总结，或用户要求总结一次讨论时使用。',
+    examples: ['会议纪要已发，请总结一下', '妙记链接来了', '@bot 帮我整理这次会议结论'],
+  },
   trigger: {
     events: ['message'],
     requireMention: false,

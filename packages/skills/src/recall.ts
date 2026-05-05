@@ -24,7 +24,11 @@ import { GapDetector, type GapDetection } from './gap-detector.js';
 
 const KEYWORDS = ['上次', '之前', '我记得', '那个', '上回', '是多少来着'] as const;
 
-async function synthesize(llm: LLMClient, query: string, hits: readonly RetrieveHit[]): Promise<string> {
+async function synthesize(
+  llm: LLMClient,
+  query: string,
+  hits: readonly RetrieveHit[],
+): Promise<string> {
   const snippets = hits.map((h, i) => `[${i + 1}] ${h.snippet}`).join('\n\n');
   const prompt = `你是群聊助手，请根据历史消息帮忙回答。
 
@@ -42,6 +46,12 @@ ${snippets}
 
 class RecallSkill implements Skill {
   readonly name = 'recall' as const;
+  readonly metadata = {
+    description: '在群聊出现模糊指代时主动召回相关历史信息。',
+    when_to_use:
+      '消息里出现“上次、之前、那个、我记得”等模糊表述，需要补足上下文但用户未必 @bot 时使用。',
+    examples: ['上次那个接口地址是多少？', '我记得之前定过截止时间', '那个方案后来怎么说的？'],
+  } as const;
   readonly trigger = {
     events: ['message'] as const,
     requireMention: false,
@@ -97,8 +107,10 @@ class RecallSkill implements Skill {
     const query: RetrieveQuery = { query: detection.query, chatId: msg.chatId, topK: 5 };
 
     const [vectorResult, bitableResult] = await Promise.all([
-      ctx.retrievers['vector']?.retrieve(query) ?? Promise.resolve(ok([] as readonly RetrieveHit[])),
-      ctx.retrievers['bitable']?.retrieve(query) ?? Promise.resolve(ok([] as readonly RetrieveHit[])),
+      ctx.retrievers['vector']?.retrieve(query) ??
+        Promise.resolve(ok([] as readonly RetrieveHit[])),
+      ctx.retrievers['bitable']?.retrieve(query) ??
+        Promise.resolve(ok([] as readonly RetrieveHit[])),
     ]);
 
     const hits: RetrieveHit[] = [

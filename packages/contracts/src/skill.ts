@@ -44,6 +44,12 @@ export interface TriggerSpec {
   readonly description: string;
 }
 
+export interface SkillMetadata {
+  readonly description: string;
+  readonly when_to_use: string;
+  readonly examples: readonly string[];
+}
+
 export interface Logger {
   debug(msg: string, meta?: Record<string, unknown>): void;
   info(msg: string, meta?: Record<string, unknown>): void;
@@ -91,6 +97,7 @@ export interface SkillResult {
 export interface Skill {
   readonly name: SkillName;
   readonly trigger: TriggerSpec;
+  readonly metadata: SkillMetadata;
 
   /** 同步快速过滤：返回 false 直接跳过，不进 run() */
   match(ctx: SkillContext): boolean | Promise<boolean>;

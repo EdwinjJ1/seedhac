@@ -243,6 +243,11 @@ async function fetchLinkedContent(
 
 export const qaSkill: Skill = {
   name: 'qa',
+  metadata: {
+    description: '回答被 @ 的项目问题，并尽量引用群历史、文档或表格上下文。',
+    when_to_use: '用户 @bot 提问，或明确要求解释项目背景、方案、负责人、进度和资料内容时使用。',
+    examples: ['@bot 这个功能怎么用？', '@bot 上次说的技术方案是什么？', '@bot 谁负责演示稿？'],
+  },
   trigger: {
     events: ['message'],
     requireMention: true,

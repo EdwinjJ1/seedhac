@@ -10,7 +10,8 @@ import type {
   SkillName,
 } from '@seedhac/contracts';
 import { SkillRouter } from '../skill-router.js';
-import { handleEvent } from '../wiring.js';
+import { handleEvent, type HarnessConfig } from '../wiring.js';
+import { NullMemoryStore } from '../memory/memory-store.js';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -55,6 +56,7 @@ function makeCtx(event: BotEvent, runtimeOverride?: BotRuntime): SkillContext {
       ask: vi.fn().mockResolvedValue(ok('这是测试回答。')),
       chat: vi.fn(),
       askStructured: vi.fn(),
+      chatWithTools: vi.fn(),
     } as unknown as SkillContext['llm'],
     bitable: {} as SkillContext['bitable'],
     docx: {} as SkillContext['docx'],
@@ -69,6 +71,18 @@ function makeCtx(event: BotEvent, runtimeOverride?: BotRuntime): SkillContext {
       warn: vi.fn(),
       error: vi.fn(),
     },
+  };
+}
+
+function makeHarness(): HarnessConfig {
+  return {
+    promptCache: {
+      build: vi.fn().mockReturnValue('system prompt'),
+      getOverviewText: vi.fn().mockReturnValue('overview full text'),
+    } as unknown as HarnessConfig['promptCache'],
+    memoryStore: new NullMemoryStore(),
+    docsRoot: '/fake/docs/bot-memory',
+    botOpenId: BOT_ID,
   };
 }
 
@@ -114,7 +128,11 @@ describe('handleEvent wiring', () => {
       fetchHistory: vi.fn().mockResolvedValue(
         ok({
           messages: [
-            makeMessage({ messageId: 'hist_1', text: '这是飞书的问答功能', sender: { userId: 'ou_other' } }),
+            makeMessage({
+              messageId: 'hist_1',
+              text: '这是飞书的问答功能',
+              sender: { userId: 'ou_other' },
+            }),
           ],
           hasMore: false,
         }),
@@ -184,13 +202,16 @@ describe('handleEvent wiring', () => {
       match: () => true,
       run: vi.fn().mockResolvedValue(ok({ card: { templateName: 'qa', content: {} } })),
     };
-    const msg = makeMessage({ text: '这是什么？', mentions: [{ user: { userId: BOT_ID }, key: '@_bot' }] });
+    const msg = makeMessage({
+      text: '这是什么？',
+      mentions: [{ user: { userId: BOT_ID }, key: '@_bot' }],
+    });
     const ctx = makeCtx(makeEvent(msg), failRuntime);
 
     await handleEvent(ctx, router, { qa: cardSkill } as unknown as Record<SkillName, Skill>);
 
     expect(failRuntime.sendCard).toHaveBeenCalledOnce();
-    expect((ctx.logger.error as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(
+    expect(ctx.logger.error as ReturnType<typeof vi.fn>).toHaveBeenCalledWith(
       'send card failed',
       expect.objectContaining({ code: ErrorCode.FEISHU_API_ERROR }),
     );
@@ -271,5 +292,94 @@ describe('handleEvent wiring', () => {
       expect(replayCtx.event.payload.text).toBe('PPT 这期要直接生成飞书幻灯片吗？');
     }
     expect(runtime.sendCard).toHaveBeenCalledOnce();
+  });
+
+  it('harness mention selects a skill and runs skill.run()', async () => {
+    const runtime = makeRuntime();
+    const msg = makeMessage({
+      text: '帮我回答这个问题',
+      mentions: [{ user: { userId: BOT_ID }, key: '@_bot' }],
+    });
+    const ctx = makeCtx(makeEvent(msg), runtime);
+    const harness = makeHarness();
+    const chatWithTools = vi.fn().mockResolvedValue(
+      ok({
+        content: JSON.stringify({ skill: 'qa', reason: 'user asked a question', args: {} }),
+        toolCalls: [],
+        rounds: 1,
+      }),
+    );
+    ctx.llm.chatWithTools = chatWithTools;
+
+    const skill: Skill = {
+      ...qaSkill,
+      run: vi.fn().mockResolvedValue(ok({ text: 'skill answer' })),
+    };
+
+    await handleEvent(ctx, router, { qa: skill } as unknown as Record<SkillName, Skill>, harness);
+
+    expect(chatWithTools).toHaveBeenCalledOnce();
+    expect(skill.run).toHaveBeenCalledOnce();
+    expect(runtime.sendText).toHaveBeenCalledWith({ chatId: 'oc_chat1', text: 'skill answer' });
+  });
+
+  it('harness silent decision does not reply or fallback', async () => {
+    const runtime = makeRuntime();
+    const ctx = makeCtx(makeEvent(makeMessage()), runtime);
+    const harness = makeHarness();
+    ctx.llm.chatWithTools = vi.fn().mockResolvedValue(
+      ok({
+        content: JSON.stringify({ skill: 'silent', reason: 'not actionable' }),
+        toolCalls: [],
+        rounds: 1,
+      }),
+    );
+    const skill: Skill = {
+      ...qaSkill,
+      run: vi.fn().mockResolvedValue(ok({ text: 'x' })),
+    };
+
+    await handleEvent(ctx, router, { qa: skill } as unknown as Record<SkillName, Skill>, harness);
+
+    expect(skill.run).not.toHaveBeenCalled();
+    expect(runtime.sendText).not.toHaveBeenCalled();
+    expect(runtime.sendCard).not.toHaveBeenCalled();
+  });
+
+  it('harness invalid JSON falls back to SkillRouter', async () => {
+    const runtime = {
+      ...makeRuntime(),
+      fetchHistory: vi.fn().mockResolvedValue(
+        ok({
+          messages: [
+            makeMessage({
+              messageId: 'hist_1',
+              text: '这是飞书的问答功能',
+              sender: { userId: 'ou_other' },
+            }),
+          ],
+          hasMore: false,
+        }),
+      ),
+    } as unknown as BotRuntime;
+    const msg = makeMessage({
+      text: '这是什么？',
+      mentions: [{ user: { userId: BOT_ID }, key: '@_bot' }],
+    });
+    const ctx = makeCtx(makeEvent(msg), runtime);
+    const harness = makeHarness();
+    ctx.llm.chatWithTools = vi
+      .fn()
+      .mockResolvedValue(ok({ content: 'not-json', toolCalls: [], rounds: 1 }));
+    const skill: Skill = {
+      ...qaSkill,
+      match: vi.fn().mockReturnValue(true),
+      run: vi.fn().mockResolvedValue(ok({ text: 'fallback answer' })),
+    };
+
+    await handleEvent(ctx, router, { qa: skill } as unknown as Record<SkillName, Skill>, harness);
+
+    expect(skill.run).toHaveBeenCalledOnce();
+    expect(runtime.sendText).toHaveBeenCalledWith({ chatId: 'oc_chat1', text: 'fallback answer' });
   });
 });

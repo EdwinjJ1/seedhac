@@ -11,6 +11,11 @@ import { OutlineSchema, SLIDES_PROMPT } from './prompts/slides.js';
 
 export const slidesSkill: Skill = {
   name: 'slides',
+  metadata: {
+    description: '基于群聊上下文和项目记忆生成飞书演示文稿。',
+    when_to_use: '用户提到 PPT、幻灯片、演示、汇报，或明确要求生成展示材料时使用。',
+    examples: ['帮我做个 PPT', '下周要向老师汇报', '@bot 根据项目进度生成演示稿'],
+  },
   trigger: {
     events: ['message'],
     requireMention: false,

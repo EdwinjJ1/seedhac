@@ -8,16 +8,13 @@ import { LarkBitableClient } from './bitable-client.js';
 import { larkCardBuilder } from './card-builder.js';
 import { createDocxClient } from './docx-client.js';
 import { VolcanoLLMClient } from './llm-client.js';
-import { NullMemoryStore } from './memory/memory-store.js';
+import { MemoryStore } from './memory/memory-store.js';
 import { SystemPromptCache } from './memory/system-prompt.js';
 import { createSlidesClient } from './slides-client.js';
 import { SkillRouter } from './skill-router.js';
 import { handleEvent } from './wiring.js';
 
-const DEFAULT_DOCS_ROOT = resolve(
-  fileURLToPath(import.meta.url),
-  '../../../../docs/bot-memory',
-);
+const DEFAULT_DOCS_ROOT = resolve(fileURLToPath(import.meta.url), '../../../../docs/bot-memory');
 
 const logger: Logger = {
   debug: (msg, meta) => console.debug(`[bot] ${msg}`, meta ?? ''),
@@ -67,8 +64,8 @@ async function main(): Promise<void> {
   const { runtime, router, llm, bitable, docx, slides } = buildDeps();
 
   const docsRoot = process.env['BOT_DOCS_ROOT'] ?? DEFAULT_DOCS_ROOT;
-  const promptCache = await SystemPromptCache.load(docsRoot);
-  const memoryStore = new NullMemoryStore(); // M2 合并后替换为真实 MemoryStore
+  const promptCache = await SystemPromptCache.load(docsRoot, { strict: true });
+  const memoryStore = new MemoryStore({ bitable, llm, logger });
   const botOpenId = process.env['LARK_BOT_OPEN_ID'] ?? '';
   const harness = { promptCache, memoryStore, docsRoot, botOpenId };
 

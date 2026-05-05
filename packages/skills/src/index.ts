@@ -18,8 +18,7 @@ export { slidesSkill } from './slides.js';
 export { summarySkill } from './summary.js';
 export { weeklySkill } from './weekly.js';
 
-/** 8 条业务主线注册表 — bot runtime 直接 import 这一行 */
-export const skills: readonly Skill[] = [
+const registeredSkills: readonly Skill[] = [
   qaSkill,
   recallSkill,
   summarySkill,
@@ -30,13 +29,23 @@ export const skills: readonly Skill[] = [
   docIterateSkill,
 ];
 
-export const skillsByName: Readonly<Record<SkillName, Skill>> = {
-  qa: qaSkill,
-  recall: recallSkill,
-  summary: summarySkill,
-  slides: slidesSkill,
-  archive: archiveSkill,
-  weekly: weeklySkill,
-  requirementDoc: requirementDocSkill,
-  docIterate: docIterateSkill,
-};
+function assertSkillMetadata(skill: Skill): void {
+  const metadata = skill.metadata;
+  if (
+    !metadata.description ||
+    !metadata.when_to_use ||
+    !Array.isArray(metadata.examples) ||
+    metadata.examples.length === 0
+  ) {
+    throw new Error(`Skill "${skill.name}" is missing required metadata`);
+  }
+}
+
+for (const skill of registeredSkills) assertSkillMetadata(skill);
+
+/** 8 条业务主线注册表 — bot runtime 直接 import 这一行 */
+export const skills: readonly Skill[] = registeredSkills;
+
+export const skillsByName: Readonly<Record<SkillName, Skill>> = Object.fromEntries(
+  skills.map((skill) => [skill.name, skill]),
+) as Readonly<Record<SkillName, Skill>>;

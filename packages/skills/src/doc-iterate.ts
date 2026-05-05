@@ -14,6 +14,11 @@ import { ErrorCode, err, makeError } from '@seedhac/contracts';
 
 export const docIterateSkill: Skill = {
   name: 'docIterate',
+  metadata: {
+    description: '根据新的讨论增量更新已有需求文档。',
+    when_to_use: '群里出现需求变更、补充、调整方案等信息，且已有需求文档需要继续迭代时使用。',
+    examples: ['需求变更一下', '补充一下登录流程', '@bot 把这个调整写进需求文档'],
+  },
   trigger: {
     events: ['message'],
     requireMention: false,
@@ -27,5 +32,10 @@ export const docIterateSkill: Skill = {
     );
   },
   run: async () =>
-    err(makeError(ErrorCode.SKILL_NOT_IMPLEMENTED, 'docIterate skill not implemented — see issue #34')),
+    err(
+      makeError(
+        ErrorCode.SKILL_NOT_IMPLEMENTED,
+        'docIterate skill not implemented — see issue #34',
+      ),
+    ),
 };

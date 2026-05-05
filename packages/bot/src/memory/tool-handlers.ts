@@ -176,7 +176,12 @@ async function handleMemorySearch(
 }
 
 function handleSkillList(): string {
-  const list = skills.map((s) => ({ name: s.name, description: s.trigger.description }));
+  const list = skills.map((s) => ({
+    name: s.name,
+    description: s.metadata.description,
+    when_to_use: s.metadata.when_to_use,
+    examples: s.metadata.examples,
+  }));
   return JSON.stringify({ skills: list });
 }
 

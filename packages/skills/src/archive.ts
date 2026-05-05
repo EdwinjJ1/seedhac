@@ -23,6 +23,11 @@ const TRIGGER_RE = /复盘|归档|项目结束|收尾/i;
 
 export const archiveSkill: Skill = {
   name: 'archive',
+  metadata: {
+    description: '在项目收尾时汇总记忆、决策和任务，生成归档卡片。',
+    when_to_use: '群里出现复盘、归档、项目结束、收尾等信号，需要整理项目成果时使用。',
+    examples: ['项目结束了，归档一下', '我们做个复盘', '@bot 汇总本项目成果'],
+  },
   trigger: {
     events: ['message'],
     requireMention: false,
@@ -55,7 +60,9 @@ export const archiveSkill: Skill = {
     const todos = todoRes.ok ? todoRes.value.records : [];
 
     // LLM 生成摘要
-    const llmResult = await ctx.llm.ask(ARCHIVE_PROMPT(memories, decisions, todos), { model: 'pro' });
+    const llmResult = await ctx.llm.ask(ARCHIVE_PROMPT(memories, decisions, todos), {
+      model: 'pro',
+    });
     if (!llmResult.ok) return err(llmResult.error);
 
     const summaryText = llmResult.value.trim();

@@ -1,4 +1,4 @@
-import type { ChatMessage, Skill, SkillContext, SkillName } from '@seedhac/contracts';
+import type { ChatMessage, LLMClient, Skill, SkillContext, SkillName } from '@seedhac/contracts';
 import type { Message } from '@seedhac/contracts';
 import type { RouteIntent } from './skill-router.js';
 import type { SkillRouter } from './skill-router.js';
@@ -20,13 +20,30 @@ export interface HarnessConfig {
   readonly botOpenId: string;
 }
 
+type HarnessDecision = {
+  readonly skill: SkillName | 'silent';
+  readonly reason?: string;
+  readonly args?: Record<string, unknown>;
+};
+
+const SKILL_NAMES: readonly SkillName[] = [
+  'qa',
+  'recall',
+  'summary',
+  'slides',
+  'archive',
+  'weekly',
+  'requirementDoc',
+  'docIterate',
+];
+
 export async function handleEvent(
   ctx: SkillContext,
   router: SkillRouter,
   skills: Readonly<Partial<Record<SkillName, Skill>>>,
   harness?: HarnessConfig,
 ): Promise<void> {
-  const { event, logger, runtime } = ctx;
+  const { event, logger } = ctx;
   if (event.type === 'cardAction') {
     await handleCardAction(ctx, skills);
     return;
@@ -38,25 +55,49 @@ export async function handleEvent(
 
   // @mention 消息走 Harness：chatWithTools 让模型按需调 memory/skill 工具
   if (harness && isMention) {
-    await handleWithHarness(ctx, msg, harness);
+    const handled = await handleWithHarness(ctx, msg, skills, harness);
+    if (handled) return;
+    logger.warn('harness fell back to SkillRouter', { chatId: msg.chatId });
+    await handleWithSkillRouter(withFallbackSystemPrompt(ctx, harness), router, skills);
     return;
   }
 
   // 非 @mention：保持原有 Skill 路由
+  await handleWithSkillRouter(ctx, router, skills);
+}
+
+async function handleWithSkillRouter(
+  ctx: SkillContext,
+  router: SkillRouter,
+  skills: Readonly<Partial<Record<SkillName, Skill>>>,
+): Promise<void> {
+  const { event } = ctx;
+  if (event.type !== 'message') return;
+  const msg = event.payload;
   const intent = router.route(msg);
   const skillName = intentToSkill[intent];
   if (!skillName) return;
   const skill = skills[skillName];
   if (!skill) return;
   if (!(await skill.match(ctx))) return;
+  await runSkill(ctx, skill);
+}
+
+async function runSkill(ctx: SkillContext, skill: Skill): Promise<void> {
+  const { event, logger, runtime } = ctx;
+  if (event.type !== 'message') return;
   const result = await skill.run(ctx);
   if (!result.ok) {
-    logger.error('skill failed', { code: result.error.code, message: result.error.message });
+    logger.error('skill failed', {
+      skill: skill.name,
+      code: result.error.code,
+      message: result.error.message,
+    });
     return;
   }
   const { card, text } = result.value;
   if (card) {
-    const sendResult = await runtime.sendCard({ chatId: msg.chatId, card });
+    const sendResult = await runtime.sendCard({ chatId: event.payload.chatId, card });
     if (!sendResult.ok) {
       logger.error('send card failed', {
         code: sendResult.error.code,
@@ -66,7 +107,7 @@ export async function handleEvent(
     }
   }
   if (text) {
-    const sendResult = await runtime.sendText({ chatId: msg.chatId, text });
+    const sendResult = await runtime.sendText({ chatId: event.payload.chatId, text });
     if (!sendResult.ok) {
       logger.error('send text failed', {
         code: sendResult.error.code,
@@ -75,15 +116,16 @@ export async function handleEvent(
       return;
     }
   }
-  logger.info(`skill=${skillName} replied to chat=${msg.chatId}`);
+  logger.info(`skill=${skill.name} replied to chat=${event.payload.chatId}`);
 }
 
 async function handleWithHarness(
   ctx: SkillContext,
   msg: Message,
+  skills: Readonly<Partial<Record<SkillName, Skill>>>,
   harness: HarnessConfig,
-): Promise<void> {
-  const { llm, runtime, logger } = ctx;
+): Promise<boolean> {
+  const { llm, logger } = ctx;
   const chatId = msg.chatId;
 
   const systemPrompt = harness.promptCache.build({ chatId, mention: true });
@@ -94,10 +136,17 @@ async function handleWithHarness(
     docsRoot: harness.docsRoot,
   });
 
-  const messages: ChatMessage[] = [{ role: 'user', content: msg.text }];
+  const decisionInstruction =
+    '请按需调用 skill.list / skill.read / memory.search，然后只输出 JSON：' +
+    '{"skill":"qa|recall|summary|slides|archive|weekly|requirementDoc|docIterate|silent","reason":"一句话原因","args":{}}。' +
+    '如果不应处理，skill 必须是 "silent"。不要输出 JSON 以外的文字。';
+
+  const messages: ChatMessage[] = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: `${msg.text}\n\n${decisionInstruction}` },
+  ];
 
   const result = await llm.chatWithTools(messages, {
-    systemPrompt,
     tools: getLLMTools(),
     executor,
     maxToolCallRounds: 5,
@@ -108,22 +157,92 @@ async function handleWithHarness(
       code: result.error.code,
       message: result.error.message,
     });
-    await runtime.sendText({ chatId, text: '抱歉，处理请求时出错了，请稍后再试。' });
-    return;
+    return false;
   }
 
   const { content, rounds, toolCalls } = result.value;
-  logger.info('harness replied', { chatId, rounds, toolCallCount: toolCalls.length });
+  logger.info('harness decision returned', { chatId, rounds, toolCallCount: toolCalls.length });
 
-  if (content) {
-    const sendResult = await runtime.sendText({ chatId, text: content });
-    if (!sendResult.ok) {
-      logger.error('harness send text failed', {
-        code: sendResult.error.code,
-        message: sendResult.error.message,
-      });
-    }
+  const decision = parseHarnessDecision(content);
+  if (!decision) {
+    logger.warn('harness decision parse failed', { chatId, content });
+    return false;
   }
+
+  if (decision.skill === 'silent') {
+    logger.info('harness selected silent', { chatId, reason: decision.reason });
+    return true;
+  }
+
+  const skill = skills[decision.skill];
+  if (!skill) {
+    logger.warn('harness selected missing skill', { chatId, skill: decision.skill });
+    return false;
+  }
+
+  logger.info('harness selected skill', {
+    chatId,
+    skill: decision.skill,
+    reason: decision.reason,
+    args: decision.args ?? {},
+  });
+  await runSkill(ctx, skill);
+  return true;
+}
+
+function parseHarnessDecision(raw: string): HarnessDecision | null {
+  const trimmed = stripCodeFence(raw);
+  try {
+    const parsed = JSON.parse(trimmed) as { skill?: unknown; reason?: unknown; args?: unknown };
+    if (parsed.skill === 'silent') {
+      return {
+        skill: 'silent',
+        ...(typeof parsed.reason === 'string' && { reason: parsed.reason }),
+        ...(isRecord(parsed.args) && { args: parsed.args }),
+      };
+    }
+    if (typeof parsed.skill !== 'string' || !isSkillName(parsed.skill)) return null;
+    return {
+      skill: parsed.skill,
+      ...(typeof parsed.reason === 'string' && { reason: parsed.reason }),
+      ...(isRecord(parsed.args) && { args: parsed.args }),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function stripCodeFence(raw: string): string {
+  const match = raw.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+  return match ? match[1]!.trim() : raw.trim();
+}
+
+function isSkillName(value: string): value is SkillName {
+  return (SKILL_NAMES as readonly string[]).includes(value);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function withFallbackSystemPrompt(ctx: SkillContext, harness: HarnessConfig): SkillContext {
+  const overview = harness.promptCache.getOverviewText();
+  if (!overview) return ctx;
+  const llm: LLMClient = {
+    ask: (prompt, opts) =>
+      ctx.llm.ask(prompt, { ...opts, systemPrompt: opts?.systemPrompt ?? overview }),
+    chat: (messages, opts) => {
+      if (opts?.systemPrompt) return ctx.llm.chat(messages, opts);
+      return ctx.llm.chat([{ role: 'system', content: overview }, ...messages], opts);
+    },
+    askStructured: (prompt, schema, opts) =>
+      ctx.llm.askStructured(prompt, schema, {
+        ...opts,
+        systemPrompt: opts?.systemPrompt ?? overview,
+      }),
+    chatWithTools: (messages, opts) => ctx.llm.chatWithTools(messages, opts),
+  };
+  return { ...ctx, llm };
 }
 
 async function handleCardAction(
