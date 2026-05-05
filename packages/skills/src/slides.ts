@@ -77,6 +77,11 @@ export const slidesSkill: Skill = {
     generating.add(chatId);
     try {
       return await runSlides(ctx, msg);
+    } catch (e) {
+      // 守住 Skill.run 契约：失败必须返回 err，不允许向上抛
+      const message = e instanceof Error ? e.message : String(e);
+      ctx.logger.error('slides: runSlides threw unexpectedly', { chatId, message });
+      return err(makeError(ErrorCode.UNKNOWN, `slides crashed: ${message}`, e));
     } finally {
       generating.delete(chatId);
     }
