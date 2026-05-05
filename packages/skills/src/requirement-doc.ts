@@ -3,27 +3,150 @@
  *
  * 触发：被动监听，群里出现项目需求描述时自动整理成结构化飞书文档
  * 数据流：
- *   群历史消息 (+ 命中的飞书 doc/wiki 正文) → LLM 结构化提取
- *   → 创建飞书文档 → 推 docPush 卡片 → 存入 memory
+ *   群历史消息 → 展开合并转发 → 抽飞书 doc/wiki 正文
+ *   → LLM lite 相关性预筛（仅历史；linkedDocs 100% 保留）
+ *   → LLM pro 结构化提取 → 创建飞书文档 → 推 docPush 卡片 → 写 memory
  *
  * 真实输入形态都覆盖：
  *   1) 单条消息直接说需求
  *   2) 多轮对话逐步澄清
  *   3) 群里只发了一个文档链接（真实需求在文档里）
- *   4) 上述组合
+ *   4) 合并转发卡片（嵌套子消息可能含 doc URL）
+ *   5) 上述组合
  */
 
 import type { Message, Skill, SkillContext } from '@seedhac/contracts';
 import { err, ok } from '@seedhac/contracts';
 import {
   REQ_PROMPT,
+  RELEVANCE_PROMPT,
+  RelevanceJudgmentSchema,
   RequirementDocSchema,
   renderRequirementDocMarkdown,
   parseFeishuDocUrls,
   type LinkedDocSnippet,
+  type RelevanceCandidate,
 } from './prompts/requirement-doc.js';
 
-const TRIGGER_RE = /项目需求|需求文档|PRD|产品需求|以下是.*需求|这是.*项目|项目背景|项目目标/i;
+// 与 packages/bot/src/skill-router.ts 的 requirementDoc 规则保持同步：
+//   - 「项目」与「需求」中间最多隔 3 字，覆盖「项目的需求 / 项目本次需求」
+//   - 「以下是 / 以上是 / 下面是 / 上面是 ... 需求」
+//   - 「这是 / 这就是 ... 项目」
+//   - 显式段落标题「项目背景 / 项目目标 / 项目范围」
+const TRIGGER_RE =
+  /项目.{0,3}需求|需求文档|功能需求|产品需求|PRD|(?:以下|以上|下面|上面)是?.{0,12}需求|这(?:就)?是.{0,8}项目|项目(?:背景|目标|范围)/i;
+
+/**
+ * 把历史消息里的「合并转发」展开：调 runtime.fetchMessage 拿父 + 嵌套子，
+ * 用嵌套子（仅文本）替换掉父消息原位。失败时保留父原样并 logger.warn。
+ */
+async function expandMergeForward(
+  ctx: SkillContext,
+  history: readonly Message[],
+): Promise<readonly Message[]> {
+  const out: Message[] = [];
+  for (const m of history) {
+    if ((m.contentType as string) !== 'merge_forward') {
+      out.push(m);
+      continue;
+    }
+    ctx.logger.info('requirementDoc: expanding merge_forward', { messageId: m.messageId });
+    const fetched = await ctx.runtime.fetchMessage(m.messageId);
+    if (!fetched.ok) {
+      ctx.logger.warn('requirementDoc: fetchMessage failed for merge_forward; keeping as-is', {
+        messageId: m.messageId,
+        code: fetched.error.code,
+        message: fetched.error.message,
+      });
+      out.push(m);
+      continue;
+    }
+    // fetched.messages: 第 1 条是父（merge_forward 自身），后面是平铺的嵌套子
+    const children = fetched.value.messages.filter(
+      (c) => (c.contentType as string) === 'text' && c.text.trim().length > 0,
+    );
+    if (children.length === 0) {
+      ctx.logger.warn('requirementDoc: merge_forward had no text children; keeping as-is', {
+        messageId: m.messageId,
+      });
+      out.push(m);
+      continue;
+    }
+    ctx.logger.info('requirementDoc: merge_forward expanded', {
+      messageId: m.messageId,
+      childCount: children.length,
+    });
+    out.push(...children);
+  }
+  return out;
+}
+
+function summarize(value: string, max = 200): string {
+  const trimmed = value.replace(/\s+/g, ' ').trim();
+  return trimmed.length > max ? `${trimmed.slice(0, max)}…` : trimmed;
+}
+
+/**
+ * 用 lite 模型对历史消息做相关性预筛 —— 群里可能掺多个项目讨论。
+ * linkedDocs 不进预筛：用户主动贴的文档是显式输入信号，100% 保留。
+ */
+async function filterByRelevance(
+  ctx: SkillContext,
+  trigger: Message,
+  history: readonly Message[],
+  linkedDocs: readonly LinkedDocSnippet[],
+): Promise<{ history: readonly Message[]; linkedDocs: readonly LinkedDocSnippet[] }> {
+  if (history.length === 0) {
+    return { history, linkedDocs };
+  }
+
+  const candidates: RelevanceCandidate[] = history.map((m, i) => ({
+    id: `m${i}`,
+    kind: 'message',
+    excerpt: `[${m.sender.name ?? m.sender.userId}] ${summarize(m.text, 200)}`,
+  }));
+
+  ctx.logger.info('requirementDoc: relevance pre-filter (history only; linkedDocs always kept)', {
+    historyCount: history.length,
+    linkedDocCount: linkedDocs.length,
+  });
+
+  const judgmentResult = await ctx.llm.askStructured(
+    RELEVANCE_PROMPT(trigger.text, candidates),
+    RelevanceJudgmentSchema,
+    { model: 'lite', timeoutMs: 30_000 },
+  );
+
+  if (!judgmentResult.ok) {
+    // 预筛挂掉不致命，退回全量
+    ctx.logger.warn('requirementDoc: relevance filter failed, falling back to full context', {
+      code: judgmentResult.error.code,
+      message: judgmentResult.error.message,
+    });
+    return { history, linkedDocs };
+  }
+
+  if (judgmentResult.value.results.length === 0) {
+    ctx.logger.warn('requirementDoc: relevance filter returned empty, skipping filter');
+    return { history, linkedDocs };
+  }
+
+  const keepIds = new Set(judgmentResult.value.results.filter((r) => r.keep).map((r) => r.id));
+  const keptHistory = history.filter((_, i) => keepIds.has(`m${i}`));
+
+  ctx.logger.info('requirementDoc: relevance pre-filter done', {
+    historyKept: `${keptHistory.length}/${history.length}`,
+    linkedDocKept: `${linkedDocs.length}/${linkedDocs.length} (always kept)`,
+  });
+
+  if (keptHistory.length === 0 && linkedDocs.length > 0) {
+    ctx.logger.warn(
+      'requirementDoc: relevance filter dropped all history, proceeding with linkedDocs only',
+    );
+  }
+
+  return { history: keptHistory, linkedDocs };
+}
 
 async function fetchLinkedDocs(
   ctx: SkillContext,
@@ -70,7 +193,7 @@ export const requirementDocSkill: Skill = {
     events: ['message'],
     requireMention: false,
     keywords: ['项目需求', '需求文档', 'PRD', '产品需求', '项目背景'],
-    description: '检测到需求描述时自动生成结构化飞书文档（支持单条 / 多轮 / 文档链接 / 组合）',
+    description: '检测到需求描述时自动生成结构化飞书文档（支持单条 / 多轮 / 文档链接 / 合并转发 / 组合）',
   },
   match: (ctx) => {
     if (ctx.event.type !== 'message') return false;
@@ -83,16 +206,27 @@ export const requirementDocSkill: Skill = {
     const msg = ctx.event.payload as Message;
     const chatId = msg.chatId;
 
-    // a. 拉取最近上下文
+    // a. 拉最近 20 条历史
     ctx.logger.info('requirementDoc: fetching chat history', { chatId });
     const historyResult = await ctx.runtime.fetchHistory({ chatId, pageSize: 20 });
     if (!historyResult.ok) return err(historyResult.error);
-    const history = historyResult.value.messages;
+    const historyRaw = historyResult.value.messages;
 
-    // b. 抽取并读取群里出现的飞书文档（如果有）
-    const linkedDocs = await fetchLinkedDocs(ctx, history);
+    // a2. 展开合并转发：父原位替换为嵌套子消息
+    const historyExpanded = await expandMergeForward(ctx, historyRaw);
 
-    // c. LLM 结构化提取（history + linkedDocs 都喂给模型）
+    // a3. 抽取并读取飞书文档（doc / wiki / 嵌套子里的 URL 也会被找到）
+    const linkedDocsAll = await fetchLinkedDocs(ctx, historyExpanded);
+
+    // b. lite 模型相关性预筛历史（linkedDocs 100% 保留）
+    const { history, linkedDocs } = await filterByRelevance(
+      ctx,
+      msg,
+      historyExpanded,
+      linkedDocsAll,
+    );
+
+    // c. pro 模型主提取
     ctx.logger.info('requirementDoc: asking LLM for structured extraction', {
       historyCount: history.length,
       linkedDocCount: linkedDocs.length,
@@ -100,7 +234,8 @@ export const requirementDocSkill: Skill = {
     const docResult = await ctx.llm.askStructured(
       REQ_PROMPT(history, linkedDocs),
       RequirementDocSchema,
-      { model: 'pro' },
+      // pro 模型默认超时 30s 不够：拉了多条历史 + 文档正文，prompt 偏长，35–60s 是常态
+      { model: 'pro', timeoutMs: 90_000 },
     );
     if (!docResult.ok) return err(docResult.error);
     const doc = docResult.value;

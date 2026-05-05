@@ -99,7 +99,10 @@ const SCENARIO_COMBO_WIKI_BODY = '标题：项目方案 v3\n\n（详细需求…
 
 // ─── ctx factories ────────────────────────────────────────────────────────────
 
-function makeRuntime(history: readonly Message[]): BotRuntime {
+function makeRuntime(
+  history: readonly Message[],
+  fetchMessageOverride?: (id: string) => ReturnType<BotRuntime['fetchMessage']>,
+): BotRuntime {
   return {
     on: vi.fn(),
     start: vi.fn().mockResolvedValue(ok(undefined)),
@@ -108,15 +111,50 @@ function makeRuntime(history: readonly Message[]): BotRuntime {
     sendCard: vi.fn(),
     patchCard: vi.fn(),
     fetchHistory: vi.fn().mockResolvedValue(ok({ messages: history, hasMore: false })),
+    fetchMembers: vi.fn().mockResolvedValue(ok({ members: [] })),
+    fetchMessage: vi
+      .fn()
+      .mockImplementation(
+        fetchMessageOverride ??
+          (async (id: string) =>
+            err(makeError(ErrorCode.FEISHU_API_ERROR, `unexpected fetchMessage call: ${id}`))),
+      ),
   } as unknown as BotRuntime;
 }
 
+/**
+ * askStructured 现在被调两次：
+ *   1) lite 跑相关性预筛 —— 默认空 results 表示「不过滤」
+ *   2) pro  跑主提取 —— 返回 MOCK_DOC
+ */
 function makeLLM(doc = MOCK_DOC): LLMClient {
   return {
     ask: vi.fn(),
     chat: vi.fn(),
-    askStructured: vi.fn().mockResolvedValue(ok(doc)),
+    askStructured: vi
+      .fn()
+      .mockImplementation(
+        async (
+          _prompt: string,
+          _schema: unknown,
+          opts?: { model?: 'lite' | 'pro' },
+        ) => {
+          if (opts?.model === 'lite') {
+            return ok({ results: [] });
+          }
+          return ok(doc);
+        },
+      ),
   } as unknown as LLMClient;
+}
+
+/** 测试 helper：拿主提取（model: 'pro'）那次 askStructured 调用的 prompt。 */
+function mainExtractionPrompt(askStructured: ReturnType<typeof vi.fn>): string {
+  const proCall = askStructured.mock.calls.find(
+    (c) => (c[2] as { model?: string } | undefined)?.model === 'pro',
+  );
+  if (!proCall) throw new Error('main extraction (model=pro) askStructured call not found');
+  return proCall[0] as string;
 }
 
 function makeCardBuilder(): CardBuilder {
@@ -236,15 +274,15 @@ describe('requirementDocSkill.run() — multi-turn conversation scenario', () =>
     const ctx = makeCtx(makeEvent('整理一下项目需求吧'), { history: SCENARIO_MULTI_TURN });
     await requirementDocSkill.run(ctx);
 
-    const [prompt] = (ctx.llm.askStructured as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    const prompt = mainExtractionPrompt(ctx.llm.askStructured as ReturnType<typeof vi.fn>);
     // 五轮对话的发言人 + 关键内容都进了 prompt
     expect(prompt).toContain('[产品经理]:');
     expect(prompt).toContain('[开发]:');
     expect(prompt).toContain('项目协作助手');
     expect(prompt).toContain('飞书 Docx');
     expect(prompt).toContain('多端');
-    // 多轮场景下不包含「关联文档」section
-    expect(prompt).not.toContain('关联文档：');
+    // 多轮场景下不包含「关联文档（主要依据）」段落
+    expect(prompt).not.toContain('关联文档（**主要依据**）');
   });
 });
 
@@ -261,8 +299,8 @@ describe('requirementDocSkill.run() — single doc link scenario', () => {
 
     expect(ctx.docx.readContent).toHaveBeenCalledWith(SCENARIO_DOC_LINK_DOCTOKEN, 'doc');
 
-    const [prompt] = (ctx.llm.askStructured as ReturnType<typeof vi.fn>).mock.calls[0]!;
-    expect(prompt).toContain('关联文档：');
+    const prompt = mainExtractionPrompt(ctx.llm.askStructured as ReturnType<typeof vi.fn>);
+    expect(prompt).toContain('关联文档');
     expect(prompt).toContain(SCENARIO_DOC_LINK_BODY.split('\n')[0]!); // 「项目名称：飞书 AI 项目协作助手」
     expect(prompt).toContain('https://feishu.cn/docx/doxcnPRDABCDEF');
   });
@@ -314,12 +352,12 @@ describe('requirementDocSkill.run() — combo (chat + linked wiki) scenario', ()
 
     expect(ctx.docx.readContent).toHaveBeenCalledWith(SCENARIO_COMBO_WIKITOKEN, 'wiki');
 
-    const [prompt] = (ctx.llm.askStructured as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    const prompt = mainExtractionPrompt(ctx.llm.askStructured as ReturnType<typeof vi.fn>);
     // 聊天部分
     expect(prompt).toContain('我整理了下我们想做的东西');
     expect(prompt).toContain('@bot 能帮整理成 PRD 吗');
     // wiki 正文
-    expect(prompt).toContain('关联文档：');
+    expect(prompt).toContain('关联文档');
     expect(prompt).toContain('项目方案 v3');
   });
 });

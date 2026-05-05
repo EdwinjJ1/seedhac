@@ -44,14 +44,28 @@ export const REQ_PROMPT = (
         .join('\n\n')
     : '';
 
+  const hasDocs = linkedDocs.length > 0;
+
+  // 关键：当用户贴了文档时，文档是唯一权威源，群聊记录只能作为「补充上下文」用，
+  // 不能反过来把群聊里其他无关讨论混进 PRD —— 否则会出现「老王在群里问 K12 备课
+  // 项目，新人贴了协作 Bot 的 wiki，最后生成的 PRD 一半 K12 一半协作 Bot」这种情况。
+  const priorityDirective = hasDocs
+    ? `本次输入中包含关联文档（见下方「关联文档」段落）。**关联文档是本次需求的唯一权威来源**：
+- title / background / goals / scope / deliverables 必须**主要来自关联文档正文**。
+- 群聊记录仅在文档明确缺失某字段时作为补充参考；与文档主题无关的历史讨论必须忽略。
+- 若群聊里讨论的是「项目 A」而文档讲的是「项目 B」，本次只输出项目 B 的 PRD，不要混合。`
+    : `本次输入只有群聊记录，没有关联文档。结合最近的多轮上下文综合判断真实需求。`;
+
   return `
-根据以下群聊记录${linkedDocs.length ? '与关联文档' : ''}，提取项目需求并整理成结构化文档。
+根据以下输入，提取项目需求并整理成结构化文档。
 
 输入可能形态：
 - 单条消息直接说出需求
-- 多轮对话逐步澄清需求（结合上下文综合判断）
+- 多轮对话逐步澄清需求
 - 群里只发了一个文档链接，真实需求写在文档正文里
 - 上述组合
+
+${priorityDirective}
 
 输出要求：
 - title：项目标题，简洁体现核心价值（10 字内）
@@ -62,10 +76,86 @@ export const REQ_PROMPT = (
 
 只返回 JSON，不要有额外文字。
 
-群聊记录：
+群聊记录${hasDocs ? '（仅供参考，文档优先）' : ''}：
 ${historyBlock}
-${docsBlock ? `\n关联文档：\n${docsBlock}\n` : ''}
+${docsBlock ? `\n关联文档（**主要依据**）：\n${docsBlock}\n` : ''}
 `.trim();
+};
+
+// ─── Relevance pre-filter ─────────────────────────────────────────────────────
+// 群里历史消息可能掺杂多个不相关项目的讨论，不能一股脑塞给主 LLM。
+// 这里跑一次 lite 模型判断每条候选历史消息是否与本次「整理项目需求」
+// 触发的目标项目相关，只保留相关的再喂给主提取流程。
+//
+// 注意：linkedDocs 不走预筛 —— 用户主动贴的文档是显式输入信号，100% 保留。
+// 否则会出现 lite 凭群历史的「主流话题」错判为本次项目，把用户当下贴的
+// 文档全过滤掉，主提取看不到文档内容，PRD 完全跑偏。
+
+export interface RelevanceCandidate {
+  readonly id: string;
+  readonly kind: 'message';
+  /** 短摘要：消息文本前 200 字 */
+  readonly excerpt: string;
+}
+
+export interface RelevanceJudgment {
+  readonly results: readonly { readonly id: string; readonly keep: boolean }[];
+}
+
+export const RELEVANCE_PROMPT = (
+  triggerText: string,
+  candidates: readonly RelevanceCandidate[],
+): string => `
+你是一个项目需求整理助手的预筛选模块。
+当前用户在群里发了一条消息触发"整理项目需求"技能，触发消息是：
+
+[trigger]
+${triggerText}
+
+下面有 ${candidates.length} 条候选群聊历史。
+判断**每条**是否与触发消息指向的需求项目相关：
+- 直接讨论同一项目 / 同一需求场景 / 同一目标用户 → keep: true
+- 完全无关的闲聊、其他项目讨论、机器人诊断噪音、重复触发消息 → keep: false
+- 不确定时**倾向 keep: true**，宁可多带一点上下文
+
+只返回如下 JSON，不要有额外文字：
+{"results":[{"id":"<候选 id>","keep":true},...]}
+
+候选列表：
+${candidates.map((c) => `[${c.id}] ${c.excerpt}`).join('\n')}
+`.trim();
+
+export const RelevanceJudgmentSchema: SchemaLike<RelevanceJudgment> = {
+  parse(value: unknown): RelevanceJudgment {
+    if (typeof value !== 'object' || value === null) throw new Error('relevance must be object');
+    const o = value as Record<string, unknown>;
+    if (!Array.isArray(o['results'])) throw new Error('relevance.results must be array');
+    return {
+      results: (o['results'] as unknown[]).map((r, i) => {
+        if (typeof r !== 'object' || r === null) throw new Error(`results[${i}] must be object`);
+        const obj = r as Record<string, unknown>;
+        if (typeof obj['id'] !== 'string') throw new Error(`results[${i}].id must be string`);
+        if (typeof obj['keep'] !== 'boolean') throw new Error(`results[${i}].keep must be boolean`);
+        return { id: obj['id'], keep: obj['keep'] };
+      }),
+    };
+  },
+  jsonSchema(): Record<string, unknown> {
+    return {
+      type: 'object',
+      required: ['results'],
+      properties: {
+        results: {
+          type: 'array',
+          items: {
+            type: 'object',
+            required: ['id', 'keep'],
+            properties: { id: { type: 'string' }, keep: { type: 'boolean' } },
+          },
+        },
+      },
+    };
+  },
 };
 
 function asStringArray(raw: unknown, field: string): string[] {
