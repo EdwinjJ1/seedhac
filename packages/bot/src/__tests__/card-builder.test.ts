@@ -148,6 +148,19 @@ describe('slides card', () => {
     expect(j).toContain('市场机会');
     expect(j).toContain('打开演示文稿');
   });
+
+  it('renders loading state', () => {
+    const card = larkCardBuilder.build('slides', {
+      title: '文件生成中…',
+      presentationUrl: '',
+      pageCount: 0,
+      isLoading: true,
+    });
+    const j = json(card);
+    expect(noPlaceholders(j)).toBe(true);
+    expect(j).toContain('演示文稿生成中');
+    expect(j).toContain('正在生成演示文稿和汇报分工文稿');
+  });
 });
 
 describe('archive card', () => {

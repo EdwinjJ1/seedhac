@@ -5,9 +5,48 @@
  * 数据流：群聊上下文 + Bitable 快照 → LLM 生成大纲 → 飞书演示文稿 → slides 卡片
  */
 
-import type { Message, Skill } from '@seedhac/contracts';
+import type { ChatMember, Message, Skill } from '@seedhac/contracts';
+import type { SlideDraft } from '@seedhac/contracts';
 import { ErrorCode, err, makeError, ok } from '@seedhac/contracts';
 import { OutlineSchema, SLIDES_PROMPT } from './prompts/slides.js';
+
+/** chatId 正在生成中的锁，防止同一群短时间内重复触发 */
+const generating = new Set<string>();
+
+const SLIDES_NEGATION_PATTERNS: readonly RegExp[] = [
+  /(?:先别|别|不要|不用|无需|不需要|暂时不).{0,12}(?:ppt|幻灯片|演示文稿|演示|汇报)/i,
+];
+
+const SLIDES_REQUEST_PATTERNS: readonly RegExp[] = [
+  /向上级汇报|给老板汇报|做.{0,10}汇报|准备.{0,10}汇报|整理.{0,10}汇报/,
+  /给老板做.{0,4}演示|做.{0,4}演示/,
+  /(?:帮|请|需要|要|得|麻烦|可以|能不能|生成|创建|做|准备|整理|产出|写|弄|交).{0,12}(?:ppt|幻灯片|演示文稿)/i,
+  /(?:ppt|幻灯片|演示文稿).{0,12}(?:生成|创建|做|准备|整理|产出|写|弄|交|汇报|给老板|给.*看)/i,
+];
+
+const ASSIGNMENT_FALLBACK = {
+  assignments: [
+    {
+      memberName: '待定成员',
+      pages: [] as Array<{ pageIndex: number; heading: string; talkingPoints: string[] }>,
+    },
+  ],
+};
+
+interface AssignmentPage {
+  readonly pageIndex: number;
+  readonly heading: string;
+  readonly talkingPoints: readonly string[];
+}
+
+interface AssignmentItem {
+  readonly memberName: string;
+  readonly pages: readonly AssignmentPage[];
+}
+
+interface Assignment {
+  readonly assignments: readonly AssignmentItem[];
+}
 
 export const slidesSkill: Skill = {
   name: 'slides',
@@ -20,7 +59,8 @@ export const slidesSkill: Skill = {
   match: (ctx) => {
     if (ctx.event.type !== 'message') return false;
     const text = (ctx.event.payload as Message).text;
-    return /ppt|幻灯片|演示文稿|向上级汇报|给老板汇报|做个演示|做.{0,10}汇报/i.test(text);
+    if (SLIDES_NEGATION_PATTERNS.some((pattern) => pattern.test(text))) return false;
+    return SLIDES_REQUEST_PATTERNS.some((pattern) => pattern.test(text));
   },
   run: async (ctx) => {
     const msg = ctx.event.payload as Message;
@@ -30,75 +70,296 @@ export const slidesSkill: Skill = {
       return err(makeError(ErrorCode.CONFIG_MISSING, 'slides client is not configured'));
     }
 
-    ctx.logger.info('slides: received request', { chatId, messageId: msg.messageId });
-    const ackResult = await ctx.runtime.sendText({
-      chatId,
-      text: '收到，正在生成演示文稿。这个过程可能需要 30 秒左右，我生成好后会把卡片发到群里。',
-    });
-    if (!ackResult.ok) {
-      ctx.logger.warn('slides: progress acknowledgement failed', {
-        code: ackResult.error.code,
-        message: ackResult.error.message,
-      });
+    if (generating.has(chatId)) {
+      ctx.logger.info('slides: generation already in progress, skipping', { chatId });
+      return ok({ text: '' });
     }
-
-    // a. 拉取群历史消息
-    ctx.logger.info('slides: fetching chat history', { chatId });
-    const historyResult = await ctx.runtime.fetchHistory({ chatId, pageSize: 30 });
-    if (!historyResult.ok) return err(historyResult.error);
-    const history = historyResult.value.messages;
-
-    // b. 查 Bitable 项目快照
-    ctx.logger.info('slides: fetching bitable snapshots', { chatId });
-    const snapshotResult = await ctx.bitable.find({
-      table: 'memory',
-      where: { chatId },
-      pageSize: 3,
-    });
-    const snapshots = snapshotResult.ok ? snapshotResult.value.records : [];
-    if (!snapshotResult.ok) {
-      ctx.logger.warn('slides: bitable snapshots skipped', {
-        code: snapshotResult.error.code,
-        message: snapshotResult.error.message,
-      });
+    generating.add(chatId);
+    try {
+      return await runSlides(ctx, msg);
+    } catch (e) {
+      // 守住 Skill.run 契约：失败必须返回 err，不允许向上抛
+      const message = e instanceof Error ? e.message : String(e);
+      ctx.logger.error('slides: runSlides threw unexpectedly', { chatId, message });
+      return err(makeError(ErrorCode.UNKNOWN, `slides crashed: ${message}`, e));
+    } finally {
+      generating.delete(chatId);
     }
-
-    // c. LLM 生成大纲
-    ctx.logger.info('slides: asking LLM for outline', {
-      historyCount: history.length,
-      snapshotCount: snapshots.length,
-    });
-    const outlineResult = await ctx.llm.askStructured(
-      SLIDES_PROMPT(history, snapshots),
-      OutlineSchema,
-      { model: 'pro' },
-    );
-    if (!outlineResult.ok) return err(outlineResult.error);
-    const outline = outlineResult.value;
-
-    // d. 创建飞书演示文稿
-    ctx.logger.info('slides: creating native presentation', {
-      title: outline.title,
-      pageCount: outline.slides.length,
-    });
-    const slidesResult = await ctx.slides.createFromOutline(outline.title, outline);
-    if (!slidesResult.ok) return err(slidesResult.error);
-
-    // e. 构建 slides 卡片
-    ctx.logger.info('slides: presentation created', { url: slidesResult.value.url });
-    const card = ctx.cardBuilder.build('slides', {
-      title: outline.title,
-      presentationUrl: slidesResult.value.url,
-      pageCount: outline.slides.length,
-      preview: outline.slides.slice(0, 2).map((s) => ({
-        title: s.heading,
-        bullets: s.bullets,
-      })),
-    });
-
-    return ok({
-      card,
-      reasoning: `检测到 PPT 需求，基于 ${history.length} 条群聊记录生成 ${outline.slides.length} 页大纲`,
-    });
   },
 };
+
+async function runSlides(ctx: Parameters<Skill['run']>[0], msg: Message): ReturnType<Skill['run']> {
+  const chatId = msg.chatId;
+  // slides client is guaranteed by the caller (checked before generating.add)
+  const slidesClient = ctx.slides!;
+
+  const loadingCard = ctx.cardBuilder.build('slides', {
+    title: '文件生成中…',
+    presentationUrl: '',
+    pageCount: 0,
+    isLoading: true,
+  });
+  const sentResult = await ctx.runtime.sendCard({ chatId, card: loadingCard });
+  if (!sentResult.ok) return err(sentResult.error);
+  const loadingMessageId = sentResult.value.messageId;
+
+  // ── Parallel batch 1: fetchHistory + fetchMembers + fetchBitable ─────────────
+  ctx.logger.info('slides: fetching history, members, and bitable snapshots in parallel', {
+    chatId,
+  });
+
+  const [historyResult, membersResult, snapshotResult] = await Promise.all([
+    ctx.runtime.fetchHistory({ chatId, pageSize: 20 }),
+    ctx.runtime.fetchMembers({ chatId }),
+    ctx.bitable.find({ table: 'memory', where: { chatId }, pageSize: 2 }),
+  ]);
+
+  // a. process fetchHistory
+  if (!historyResult.ok) {
+    await patchErrorCard(ctx, loadingMessageId, '幻灯片生成', historyResult.error.message);
+    return err(historyResult.error);
+  }
+  const history = historyResult.value.messages;
+
+  // d. process fetchMembers
+  const members = membersResult.ok ? membersResult.value.members : [];
+  if (!membersResult.ok) {
+    ctx.logger.warn('slides: members skipped', {
+      code: membersResult.error.code,
+      message: membersResult.error.message,
+    });
+  }
+
+  // b. process fetchBitable
+  const snapshots = snapshotResult.ok ? snapshotResult.value.records : [];
+  if (!snapshotResult.ok) {
+    ctx.logger.warn('slides: bitable snapshots skipped', {
+      code: snapshotResult.error.code,
+      message: snapshotResult.error.message,
+    });
+  }
+
+  // c. LLM 生成大纲
+  ctx.logger.info('slides: asking LLM for outline', {
+    historyCount: history.length,
+    snapshotCount: snapshots.length,
+  });
+  const outlineResult = await ctx.llm.askStructured(
+    SLIDES_PROMPT(history, snapshots, members),
+    OutlineSchema,
+    { model: 'pro', timeoutMs: 90_000, maxTokens: 2600, temperature: 0.2 },
+  );
+  if (!outlineResult.ok) {
+    await patchErrorCard(ctx, loadingMessageId, '幻灯片生成', outlineResult.error.message);
+    return err(outlineResult.error);
+  }
+  const outline = outlineResult.value;
+
+  // e. 汇报分工从 outline.presenterName 生成；LLM 在一次大纲调用里已根据聊天贡献分配负责人。
+  ctx.logger.info('slides: building assignment locally', { memberCount: members.length });
+  const assignment = buildAssignment(outline.slides, members);
+
+  // ── Parallel batch 2: createFromOutline + createFromMarkdown ─────────────────
+  ctx.logger.info('slides: creating native presentation and assignment doc in parallel', {
+    title: outline.title,
+    pageCount: outline.slides.length,
+  });
+
+  const assignmentTitle = `${outline.title} — 汇报分工`;
+  const assignmentMd = renderAssignmentMarkdown(assignmentTitle, assignment);
+
+  const [slidesResult, assignmentDocResult] = await Promise.all([
+    slidesClient.createFromOutline(outline.title, outline),
+    ctx.docx.createFromMarkdown(assignmentTitle, assignmentMd),
+  ]);
+
+  // f. handle slides creation result
+  if (!slidesResult.ok) {
+    await patchErrorCard(ctx, loadingMessageId, outline.title, slidesResult.error.message);
+    return err(slidesResult.error);
+  }
+
+  // g. handle assignment doc creation result
+  if (!assignmentDocResult.ok) {
+    await patchErrorCard(ctx, loadingMessageId, assignmentTitle, assignmentDocResult.error.message);
+    return err(assignmentDocResult.error);
+  }
+
+  // g2. 授予团队成员访问权限。
+  // - slides：lark-cli `--as bot` 创建 → bot 是 owner → bot 自己逐成员 openid 授权。
+  // - 分工文档：bot 用 SDK 创建并 own，可直接 grantMembersEdit。
+  const memberIds = members.map((m) => m.userId);
+  const [slidesMembersEditResult, docEditResult] = await Promise.all([
+    memberIds.length > 0
+      ? slidesClient.grantMembersEdit(slidesResult.value.slidesToken, memberIds)
+      : ok(undefined),
+    memberIds.length > 0
+      ? ctx.docx.grantMembersEdit(assignmentDocResult.value.docToken, 'docx', memberIds)
+      : ok(undefined),
+  ]);
+  if (memberIds.length > 0) {
+    if (!slidesMembersEditResult.ok) {
+      ctx.logger.warn('slides: grant slides members edit failed', {
+        code: slidesMembersEditResult.error.code,
+        message: slidesMembersEditResult.error.message,
+      });
+    } else {
+      ctx.logger.info('slides: granted slides members edit', { memberCount: memberIds.length });
+    }
+    if (!docEditResult.ok) {
+      ctx.logger.warn('slides: grant assignment doc edit failed', {
+        code: docEditResult.error.code,
+        message: docEditResult.error.message,
+      });
+    }
+  } else {
+    ctx.logger.warn('slides: no chat members fetched, skip granting slides permissions', { chatId });
+  }
+
+  // h. patch loading 卡片为最终演示文稿卡片
+  ctx.logger.info('slides: presentation created', { url: slidesResult.value.url });
+  const finalSlidesCard = ctx.cardBuilder.build('slides', {
+    title: outline.title,
+    presentationUrl: slidesResult.value.url,
+    pageCount: outline.slides.length,
+    preview: outline.slides.slice(0, 2).map((s) => ({
+      title: getSlideTitle(s),
+      bullets: getSlideTalkingPoints(s),
+    })),
+  });
+  const patchResult = await ctx.runtime.patchCard({
+    messageId: loadingMessageId,
+    card: finalSlidesCard,
+  });
+  if (!patchResult.ok) {
+    ctx.logger.warn('slides: patch loading card failed', {
+      code: patchResult.error.code,
+      message: patchResult.error.message,
+    });
+  }
+
+  // i. 返回汇报分工文稿卡片，由 wiring 发第二条卡片
+  const assignmentCard = ctx.cardBuilder.build('docPush', {
+    docTitle: assignmentTitle,
+    docUrl: assignmentDocResult.value.url,
+    docType: 'report',
+    summary: `共 ${assignment.assignments.length} 位成员，${outline.slides.length} 页幻灯片`,
+  });
+
+  return ok({
+    card: assignmentCard,
+    reasoning: `检测到 PPT 需求，基于 ${history.length} 条群聊记录生成 ${outline.slides.length} 页大纲与汇报分工`,
+  });
+}
+
+function getSlideTitle(slide: SlideDraft): string {
+  return slide.title;
+}
+
+function getSlideTalkingPoints(slide: SlideDraft): readonly string[] {
+  if (slide.bullets?.length) return slide.bullets;
+  if (slide.cards?.length) {
+    return slide.cards
+      .slice(0, 4)
+      .map((card) => [card.value, card.title, card.detail].filter(Boolean).join(' · '));
+  }
+  if (slide.milestones?.length) {
+    return slide.milestones
+      .slice(0, 4)
+      .map((m) => [m.date, m.label, m.status].filter(Boolean).join(' · '));
+  }
+  if (slide.risks?.length) {
+    return slide.risks.slice(0, 4).map((r) => `${r.risk}：${r.mitigation}`);
+  }
+  if (slide.tasks?.length) {
+    return slide.tasks
+      .slice(0, 4)
+      .map((t) => `${t.owner}：${t.task}${t.due ? `（${t.due}）` : ''}`);
+  }
+  return slide.subtitle ? [slide.subtitle] : [];
+}
+
+function renderAssignmentMarkdown(title: string, assignment: Assignment): string {
+  const effectiveAssignments =
+    assignment.assignments.length > 0 ? assignment.assignments : ASSIGNMENT_FALLBACK.assignments;
+  return `# ${title}\n\n${effectiveAssignments
+    .map(
+      (a) =>
+        `## ${a.memberName}\n${a.pages
+          .map(
+            (p) =>
+              `### 第 ${p.pageIndex + 1} 页：${p.heading}\n${p.talkingPoints
+                .map((point) => `- ${point}`)
+                .join('\n')}`,
+          )
+          .join('\n\n')}`,
+    )
+    .join('\n\n')}`;
+}
+
+function buildAssignment(
+  slides: readonly SlideDraft[],
+  members: readonly ChatMember[],
+): Assignment {
+  const assignees = members.length > 0 ? members : [{ userId: 'pending', name: '待定成员' }];
+  const assignments = assignees.map((member) => ({
+    memberName: member.name,
+    pages: [] as AssignmentPage[],
+  }));
+  const reportSlides = slides
+    .map((slide, pageIndex) => ({ slide, pageIndex }))
+    .filter(({ slide }) => slide.type !== 'cover' && slide.type !== 'closing');
+  const effectiveSlides =
+    reportSlides.length > 0
+      ? reportSlides
+      : slides.map((slide, pageIndex) => ({ slide, pageIndex }));
+
+  effectiveSlides.forEach(({ slide, pageIndex }, index) => {
+    const target =
+      findAssignmentByPresenter(assignments, slide.presenterName) ??
+      assignments[index % assignments.length]!;
+    target.pages.push({
+      pageIndex,
+      heading: getSlideTitle(slide),
+      talkingPoints: getSlideTalkingPoints(slide).slice(0, 3),
+    });
+  });
+
+  return { assignments };
+}
+
+function findAssignmentByPresenter(
+  assignments: readonly { memberName: string; pages: AssignmentPage[] }[],
+  presenterName: string | undefined,
+): { memberName: string; pages: AssignmentPage[] } | undefined {
+  if (!presenterName) return undefined;
+  const normalizedPresenter = normalizeName(presenterName);
+  return assignments.find(
+    (assignment) => normalizeName(assignment.memberName) === normalizedPresenter,
+  );
+}
+
+function normalizeName(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+async function patchErrorCard(
+  ctx: Parameters<Skill['run']>[0],
+  messageId: string,
+  title: string,
+  message: string,
+): Promise<void> {
+  const errorCard = ctx.cardBuilder.build('slides', {
+    title,
+    presentationUrl: '',
+    pageCount: 0,
+    errorMessage: `文件生成失败：${message}`,
+  });
+  const patchResult = await ctx.runtime.patchCard({ messageId, card: errorCard });
+  if (!patchResult.ok) {
+    ctx.logger.warn('slides: patch error card failed', {
+      code: patchResult.error.code,
+      message: patchResult.error.message,
+    });
+  }
+}

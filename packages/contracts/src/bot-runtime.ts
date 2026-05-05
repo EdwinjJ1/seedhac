@@ -46,6 +46,19 @@ export interface FetchHistoryResult {
   readonly nextPageToken?: string;
 }
 
+export interface FetchMembersParams {
+  readonly chatId: string;
+}
+
+export interface ChatMember {
+  readonly userId: string;
+  readonly name: string;
+}
+
+export interface FetchMembersResult {
+  readonly members: readonly ChatMember[];
+}
+
 export interface PatchCardParams {
   readonly messageId: string;
   readonly card: Card;
@@ -65,6 +78,9 @@ export interface BotRuntime {
 
   /** 拉取群历史消息（机器人必须是群成员）*/
   fetchHistory(params: FetchHistoryParams): Promise<Result<FetchHistoryResult>>;
+
+  /** 拉取群成员列表（机器人必须是群成员）*/
+  fetchMembers(params: FetchMembersParams): Promise<Result<FetchMembersResult>>;
 
   /** 注册事件回调；返回 unregister 函数 */
   on(handler: EventHandler): () => void;

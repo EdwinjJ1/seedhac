@@ -181,16 +181,16 @@ describe('slides', () => {
     expect(router.route(plain('下周要做PPT汇报'))).toBe('slides');
   });
 
-  it('pos: "幻灯片" → slides', () => {
-    expect(router.route(plain('幻灯片初稿出来了'))).toBe('slides');
+  it('pos: "帮忙整理幻灯片" → slides', () => {
+    expect(router.route(plain('帮忙整理一下幻灯片初稿'))).toBe('slides');
   });
 
   it('pos: "向上级汇报" → slides', () => {
     expect(router.route(plain('我们需要向上级汇报项目进展'))).toBe('slides');
   });
 
-  it('pos: "演示文稿" → slides', () => {
-    expect(router.route(plain('演示文稿风格参考上次的'))).toBe('slides');
+  it('pos: "生成演示文稿" → slides', () => {
+    expect(router.route(plain('根据项目进展生成演示文稿'))).toBe('slides');
   });
 
   it('neg: 含需求关键词 → requirementDoc 优先级低，slides 先命中 → slides', () => {
@@ -199,6 +199,13 @@ describe('slides', () => {
 
   it('neg: 普通消息 → silent', () => {
     expect(router.route(plain('今天下午有时间吗'))).toBe('silent');
+  });
+
+  it('neg: merely discussing ppt does not trigger slides', () => {
+    expect(router.route(plain('这个ppt怎么样'))).toBe('silent');
+    expect(router.route(plain('这个 ppt 风格太丑了'))).toBe('silent');
+    expect(router.route(plain('上次 PPT 放哪了'))).toBe('silent');
+    expect(router.route(plain('我们先别做 ppt'))).toBe('silent');
   });
 });
 
