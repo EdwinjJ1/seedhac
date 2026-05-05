@@ -29,7 +29,19 @@ interface RouteRule {
   /** 与 contracts/Skill.trigger.requireMention 同名，语义一致：是否要求 @bot */
   readonly requireMention: boolean;
   readonly patterns: readonly RegExp[];
+  readonly excludePatterns?: readonly RegExp[];
 }
+
+const SLIDES_NEGATION_PATTERNS: readonly RegExp[] = [
+  /(?:先别|别|不要|不用|无需|不需要|暂时不).{0,12}(?:ppt|幻灯片|演示文稿|演示|汇报)/i,
+];
+
+const SLIDES_REQUEST_PATTERNS: readonly RegExp[] = [
+  /向上级汇报|给老板汇报|做.{0,10}汇报|准备.{0,10}汇报|整理.{0,10}汇报/,
+  /给老板做.{0,4}演示|做.{0,4}演示/,
+  /(?:帮|请|需要|要|得|麻烦|可以|能不能|生成|创建|做|准备|整理|产出|写|弄|交).{0,12}(?:ppt|幻灯片|演示文稿)/i,
+  /(?:ppt|幻灯片|演示文稿).{0,12}(?:生成|创建|做|准备|整理|产出|写|弄|交|汇报|给老板|给.*看)/i,
+];
 
 /** 规则表，按优先级从高到低排列 */
 const RULES: readonly RouteRule[] = [
@@ -100,7 +112,8 @@ const RULES: readonly RouteRule[] = [
   {
     intent: 'slides',
     requireMention: false,
-    patterns: [/ppt/i, /幻灯片/, /演示文稿/, /向上级汇报/, /给老板汇报/, /做个演示/],
+    patterns: SLIDES_REQUEST_PATTERNS,
+    excludePatterns: SLIDES_NEGATION_PATTERNS,
   },
 
   // ── requirementDoc：项目需求/资料（被动，最宽泛放最后）──────────
@@ -147,6 +160,7 @@ export class SkillRouter {
 
     for (const rule of RULES) {
       if (rule.requireMention && !mentioned) continue;
+      if (rule.excludePatterns?.some((p) => p.test(text))) continue;
       if (rule.patterns.some((p) => p.test(text))) {
         return rule.intent;
       }

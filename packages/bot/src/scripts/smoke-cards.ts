@@ -113,7 +113,18 @@ async function main(): Promise<void> {
   await sleep(800);
 
   await send(
-    '6/10 slides — 演示文稿',
+    '6a/10 slides — loading 状态',
+    larkCardBuilder.build('slides', {
+      title: '文件生成中…',
+      presentationUrl: '',
+      pageCount: 0,
+      isLoading: true,
+    }).content,
+  );
+  await sleep(800);
+
+  await send(
+    '6b/10 slides — 演示文稿（最终）',
     larkCardBuilder.build('slides', {
       title: '业务探索方向汇报',
       presentationUrl: 'https://example.feishu.cn/slides/demo',
@@ -124,6 +135,17 @@ async function main(): Promise<void> {
         { title: '技术实现', bullets: ['飞书 Card 2.0', '7 条 Skill 主线'] },
         { title: '下一步', bullets: ['MVP 上线', '用户反馈'] },
       ],
+    }).content,
+  );
+  await sleep(800);
+
+  await send(
+    '6c/10 slides — 错误状态',
+    larkCardBuilder.build('slides', {
+      title: '业务探索方向汇报 — 汇报分工',
+      presentationUrl: '',
+      pageCount: 0,
+      errorMessage: '文件生成失败：飞书 API 返回 403',
     }).content,
   );
   await sleep(800);

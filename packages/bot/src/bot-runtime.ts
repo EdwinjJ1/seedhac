@@ -10,6 +10,8 @@ import {
   type PatchCardParams,
   type FetchHistoryParams,
   type FetchHistoryResult,
+  type FetchMembersParams,
+  type FetchMembersResult,
   type Message,
   type Mention,
   type UserRef,
@@ -425,6 +427,30 @@ export class LarkBotRuntime implements BotRuntime {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       return err(makeError(ErrorCode.FEISHU_API_ERROR, `fetchHistory error: ${msg}`, e));
+    }
+  }
+
+  async fetchMembers(params: FetchMembersParams): Promise<Result<FetchMembersResult>> {
+    await this.limiter.acquire();
+    try {
+      const res = await this.client.im.v1.chatMembers.get({
+        path: { chat_id: params.chatId },
+        params: { member_id_type: 'open_id', page_size: 100 },
+      });
+
+      if (res.code !== 0) {
+        return err(makeError(ErrorCode.FEISHU_API_ERROR, `fetchMembers failed: ${res.msg}`));
+      }
+
+      return ok({
+        members: (res.data?.items ?? []).map((item) => ({
+          userId: item.member_id ?? '',
+          name: item.name ?? item.member_id ?? '未知成员',
+        })),
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return err(makeError(ErrorCode.FEISHU_API_ERROR, `fetchMembers error: ${msg}`, e));
     }
   }
 }

@@ -93,6 +93,8 @@ export interface SlidesCardInput {
   readonly presentationUrl: string;
   readonly pageCount: number;
   readonly preview?: readonly { title: string; bullets: readonly string[] }[];
+  readonly isLoading?: boolean;
+  readonly errorMessage?: string;
 }
 
 export interface ArchiveCardInput {

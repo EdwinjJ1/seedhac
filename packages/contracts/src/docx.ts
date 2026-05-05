@@ -19,4 +19,6 @@ export interface DocxClient {
   createFromMarkdown(title: string, markdown: string): Promise<Result<DocRef>>;
   /** 读取文档 / wiki / 幻灯片的纯文本内容 */
   readContent(token: string, kind?: 'doc' | 'wiki' | 'slides'): Promise<Result<string>>;
+  /** 将指定用户加为 Drive 文件的编辑协作者 */
+  grantMembersEdit(token: string, type: 'docx' | 'slides', userIds: readonly string[]): Promise<Result<void>>;
 }
