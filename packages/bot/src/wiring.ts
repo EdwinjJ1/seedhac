@@ -26,17 +26,6 @@ type HarnessDecision = {
   readonly args?: Record<string, unknown>;
 };
 
-const SKILL_NAMES: readonly SkillName[] = [
-  'qa',
-  'recall',
-  'summary',
-  'slides',
-  'archive',
-  'weekly',
-  'requirementDoc',
-  'docIterate',
-];
-
 export async function handleEvent(
   ctx: SkillContext,
   router: SkillRouter,
@@ -136,9 +125,10 @@ async function handleWithHarness(
     docsRoot: harness.docsRoot,
   });
 
+  const skillChoices = [...registeredSkillNames(skills), 'silent'].join('|');
   const decisionInstruction =
     '请按需调用 skill.list / skill.read / memory.search，然后只输出 JSON：' +
-    '{"skill":"qa|recall|summary|slides|archive|weekly|requirementDoc|docIterate|silent","reason":"一句话原因","args":{}}。' +
+    `{"skill":"${skillChoices}","reason":"一句话原因","args":{}}。` +
     '如果不应处理，skill 必须是 "silent"。不要输出 JSON 以外的文字。';
 
   const messages: ChatMessage[] = [
@@ -163,7 +153,7 @@ async function handleWithHarness(
   const { content, rounds, toolCalls } = result.value;
   logger.info('harness decision returned', { chatId, rounds, toolCallCount: toolCalls.length });
 
-  const decision = parseHarnessDecision(content);
+  const decision = parseHarnessDecision(content, skills);
   if (!decision) {
     logger.warn('harness decision parse failed', { chatId, content });
     return false;
@@ -190,7 +180,10 @@ async function handleWithHarness(
   return true;
 }
 
-function parseHarnessDecision(raw: string): HarnessDecision | null {
+function parseHarnessDecision(
+  raw: string,
+  skills: Readonly<Partial<Record<SkillName, Skill>>>,
+): HarnessDecision | null {
   const trimmed = stripCodeFence(raw);
   try {
     const parsed = JSON.parse(trimmed) as { skill?: unknown; reason?: unknown; args?: unknown };
@@ -201,7 +194,7 @@ function parseHarnessDecision(raw: string): HarnessDecision | null {
         ...(isRecord(parsed.args) && { args: parsed.args }),
       };
     }
-    if (typeof parsed.skill !== 'string' || !isSkillName(parsed.skill)) return null;
+    if (typeof parsed.skill !== 'string' || !isSkillName(parsed.skill, skills)) return null;
     return {
       skill: parsed.skill,
       ...(typeof parsed.reason === 'string' && { reason: parsed.reason }),
@@ -217,8 +210,17 @@ function stripCodeFence(raw: string): string {
   return match ? match[1]!.trim() : raw.trim();
 }
 
-function isSkillName(value: string): value is SkillName {
-  return (SKILL_NAMES as readonly string[]).includes(value);
+function registeredSkillNames(
+  skills: Readonly<Partial<Record<SkillName, Skill>>>,
+): readonly SkillName[] {
+  return Object.keys(skills).filter((name): name is SkillName => isSkillName(name, skills));
+}
+
+function isSkillName(
+  value: string,
+  skills: Readonly<Partial<Record<SkillName, Skill>>>,
+): value is SkillName {
+  return Object.prototype.hasOwnProperty.call(skills, value) && Boolean(skills[value as SkillName]);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

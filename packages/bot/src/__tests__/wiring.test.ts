@@ -323,6 +323,39 @@ describe('handleEvent wiring', () => {
     expect(runtime.sendText).toHaveBeenCalledWith({ chatId: 'oc_chat1', text: 'skill answer' });
   });
 
+  it('harness decision prompt derives skill names from registered skills', async () => {
+    const runtime = makeRuntime();
+    const msg = makeMessage({
+      text: '帮我回答这个问题',
+      mentions: [{ user: { userId: BOT_ID }, key: '@_bot' }],
+    });
+    const ctx = makeCtx(makeEvent(msg), runtime);
+    const harness = makeHarness();
+    const chatWithTools = vi.fn().mockResolvedValue(
+      ok({
+        content: JSON.stringify({ skill: 'qa', reason: 'user asked a question', args: {} }),
+        toolCalls: [],
+        rounds: 1,
+      }),
+    );
+    ctx.llm.chatWithTools = chatWithTools;
+
+    const skill: Skill = {
+      ...qaSkill,
+      run: vi.fn().mockResolvedValue(ok({ text: 'skill answer' })),
+    };
+
+    await handleEvent(ctx, router, { qa: skill } as Partial<Record<SkillName, Skill>>, harness);
+
+    const [messages] = chatWithTools.mock.calls[0]!;
+    const userMessage = (messages as Array<{ role: string; content: string }>).find(
+      (m) => m.role === 'user',
+    );
+    expect(userMessage?.content).toContain('"skill":"qa|silent"');
+    expect(userMessage?.content).not.toContain('weekly');
+    expect(userMessage?.content).not.toContain('requirementDoc');
+  });
+
   it('harness silent decision does not reply or fallback', async () => {
     const runtime = makeRuntime();
     const ctx = makeCtx(makeEvent(makeMessage()), runtime);
