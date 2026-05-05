@@ -56,7 +56,9 @@ function makeCtx(event: BotEvent, runtimeOverride?: BotRuntime): SkillContext {
       chat: vi.fn(),
       askStructured: vi.fn(),
     } as unknown as SkillContext['llm'],
-    bitable: {} as SkillContext['bitable'],
+    bitable: {
+      insert: vi.fn().mockResolvedValue(ok({ tableId: 't', recordId: 'r' })),
+    } as unknown as SkillContext['bitable'],
     docx: {} as SkillContext['docx'],
     slides: {} as NonNullable<SkillContext['slides']>,
     cardBuilder: {
@@ -137,19 +139,71 @@ describe('handleEvent wiring', () => {
   });
 
   // 4. intent 无映射（taskAssignment）→ 不触发任何 skill
-  it('intent with no skill mapping → run() not called', async () => {
+  it('taskAssignment intent → writes to bitable memory and no skill runs', async () => {
     const mockSkill: Skill = {
       ...qaSkill,
       match: () => true,
       run: vi.fn().mockResolvedValue(ok({ text: 'x' })),
     };
-    // 分工讨论触发 taskAssignment，intentToSkill 无 taskAssignment 映射
-    const msg = makeMessage({ text: '张三负责前端，李四负责后端', mentions: [] });
+    const msg = makeMessage({ text: '我来负责前端，DDL 下周五', mentions: [] });
     const ctx = makeCtx(makeEvent(msg));
 
     await handleEvent(ctx, router, { qa: mockSkill } as unknown as Record<SkillName, Skill>);
+    // bitable.insert is fire-and-forget; flush microtasks so the promise resolves before assertions
+    await new Promise((resolve) => setImmediate(resolve));
 
     expect(mockSkill.run).not.toHaveBeenCalled();
+    expect(ctx.bitable.insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        table: 'memory',
+        row: expect.objectContaining({
+          chatId: msg.chatId,
+          type: 'taskAssignment',
+          content: msg.text,
+        }),
+      }),
+    );
+  });
+
+  it('progressUpdate intent → writes to bitable memory and no skill runs', async () => {
+    const mockSkill: Skill = {
+      ...qaSkill,
+      match: () => true,
+      run: vi.fn().mockResolvedValue(ok({ text: 'x' })),
+    };
+    const msg = makeMessage({ text: '前端模块已完成，下周联调', mentions: [] });
+    const ctx = makeCtx(makeEvent(msg));
+
+    await handleEvent(ctx, router, { qa: mockSkill } as unknown as Record<SkillName, Skill>);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(mockSkill.run).not.toHaveBeenCalled();
+    expect(ctx.bitable.insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        table: 'memory',
+        row: expect.objectContaining({ type: 'progressUpdate' }),
+      }),
+    );
+  });
+
+  it('side-effect bitable insert failure → logs warn but does not throw', async () => {
+    const failingBitable = {
+      insert: vi
+        .fn()
+        .mockResolvedValue(err(makeError(ErrorCode.FEISHU_API_ERROR, 'bitable down'))),
+    } as unknown as SkillContext['bitable'];
+    const msg = makeMessage({ text: '我来负责前端，DDL 下周五', mentions: [] });
+    const ctx = { ...makeCtx(makeEvent(msg)), bitable: failingBitable };
+
+    await expect(
+      handleEvent(ctx, router, {} as unknown as Record<SkillName, Skill>),
+    ).resolves.toBeUndefined();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(ctx.logger.warn as ReturnType<typeof vi.fn>).toHaveBeenCalledWith(
+      'bitable insert failed',
+      expect.objectContaining({ intent: 'taskAssignment', code: ErrorCode.FEISHU_API_ERROR }),
+    );
   });
 
   // 5. skill.run() 返回 err → 不 crash，logger.error 被调用
