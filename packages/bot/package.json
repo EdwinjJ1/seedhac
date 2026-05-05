@@ -16,7 +16,8 @@
     "dev:smoke-bot-runtime": "node --env-file=../../.env --import tsx/esm src/scripts/smoke-bot-runtime.ts",
     "dev:smoke-tool-call": "node --env-file=../../.env --import tsx/esm src/scripts/smoke-tool-call.ts",
     "start": "node --env-file=../../.env dist/index.js",
-    "test": "vitest run"
+    "test": "vitest run --exclude '**/*.eval.test.ts'",
+    "eval:gap-detector": "node --env-file=../../.env --import tsx/esm ./node_modules/vitest/vitest.mjs run src/__tests__/gap-detector.eval.test.ts"
   },
   "dependencies": {
     "@larksuiteoapi/node-sdk": "^1.62.1",
