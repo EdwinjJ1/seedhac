@@ -75,6 +75,7 @@ function parseMsgType(raw: string): MessageContentType {
     audio: 'audio',
     interactive: 'card',
     sticker: 'sticker',
+    merge_forward: 'merge_forward',
   };
   return map[raw] ?? 'unknown';
 }
@@ -224,8 +225,24 @@ export class LarkBotRuntime implements BotRuntime {
         ...(this.env.logLevel !== undefined && { loggerLevel: this.env.logLevel }),
       }).register({
         'im.message.receive_v1': async (data) => {
-          const msg = parseMessage(data as unknown as Record<string, unknown>);
-          this.emit({ type: 'message', payload: msg });
+          // 诊断日志：长连接送来的每一条 message 事件，先记录原始指纹，
+          // 再尝试解析。任何 parse 失败也能在 log 里看到，避免事件被静默吞掉。
+          try {
+            const raw = data as unknown as Record<string, unknown>;
+            const m = (raw['message'] ?? {}) as Record<string, unknown>;
+            const s = (raw['sender'] ?? {}) as Record<string, unknown>;
+            console.info(
+              `[BotRuntime] im.message.receive_v1 message_id=${String(m['message_id'] ?? '?')} chat_id=${String(m['chat_id'] ?? '?')} chat_type=${String(m['chat_type'] ?? '?')} message_type=${String(m['message_type'] ?? '?')} sender_id_type=${String(((s['sender_id'] ?? {}) as Record<string, unknown>)['sender_type'] ?? '?')}`,
+            );
+          } catch (e) {
+            console.error('[BotRuntime] failed to log raw message event', e);
+          }
+          try {
+            const msg = parseMessage(data as unknown as Record<string, unknown>);
+            this.emit({ type: 'message', payload: msg });
+          } catch (e) {
+            console.error('[BotRuntime] parseMessage threw, event dropped:', e);
+          }
           return { code: 0 };
         },
         'im.chat.member.bot.added_v1': async (data) => {
@@ -425,6 +442,61 @@ export class LarkBotRuntime implements BotRuntime {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       return err(makeError(ErrorCode.FEISHU_API_ERROR, `fetchHistory error: ${msg}`, e));
+    }
+  }
+
+  async fetchMessage(
+    messageId: string,
+  ): Promise<Result<{ readonly messages: readonly Message[] }>> {
+    await this.limiter.acquire();
+    try {
+      // GET /open-apis/im/v1/messages/{message_id}
+      // 返回值：data.items[] —— 普通消息只有 1 条；merge_forward 则父在前 + 全部嵌套子
+      const res = await (
+        this.client.im.message as unknown as {
+          get: (p: unknown) => Promise<{
+            code?: number;
+            msg?: string;
+            data?: { items?: Array<Record<string, unknown>> };
+          }>;
+        }
+      ).get({ path: { message_id: messageId } });
+
+      if (res.code !== 0) {
+        return err(makeError(ErrorCode.FEISHU_API_ERROR, `fetchMessage failed: ${res.msg}`));
+      }
+
+      const items = res.data?.items ?? [];
+      const messages: Message[] = items.map((item) => {
+        const sender = (item.sender as Record<string, unknown> | undefined) ?? {};
+        const senderId = (sender.id as Record<string, unknown> | undefined) ?? {};
+        // sender.id 在这个 endpoint 是字符串 open_id，而不是 sender.id.open_id
+        const senderOpenId =
+          typeof sender.id === 'string' ? (sender.id as string) : (senderId.open_id as string | undefined);
+        return parseMessage({
+          message: {
+            message_id: item.message_id,
+            chat_id: item.chat_id,
+            chat_type: item.chat_type,
+            message_type: item.msg_type ?? item.message_type,
+            content: item.body ? (item.body as Record<string, unknown>).content : item.content,
+            create_time: item.create_time,
+            mentions: item.mentions ?? [],
+            parent_id: item.parent_id ?? item.upper_message_id,
+          },
+          sender: {
+            sender_id: {
+              open_id: senderOpenId,
+              union_id: senderId.union_id,
+            },
+          },
+        });
+      });
+
+      return ok({ messages });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return err(makeError(ErrorCode.FEISHU_API_ERROR, `fetchMessage error: ${msg}`, e));
     }
   }
 }

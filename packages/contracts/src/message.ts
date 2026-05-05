@@ -14,6 +14,7 @@ export type MessageContentType =
   | 'audio'
   | 'card'
   | 'sticker'
+  | 'merge_forward' // 合并转发：rawContent 是 "Merged and Forwarded Message"，嵌套子消息要走 fetchMessage 展开
   | 'unknown';
 
 export interface UserRef {

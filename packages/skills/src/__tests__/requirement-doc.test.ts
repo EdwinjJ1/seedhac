@@ -99,7 +99,10 @@ const SCENARIO_COMBO_WIKI_BODY = '标题：项目方案 v3\n\n（详细需求…
 
 // ─── ctx factories ────────────────────────────────────────────────────────────
 
-function makeRuntime(history: readonly Message[]): BotRuntime {
+function makeRuntime(
+  history: readonly Message[],
+  fetchMessageOverride?: (id: string) => ReturnType<BotRuntime['fetchMessage']>,
+): BotRuntime {
   return {
     on: vi.fn(),
     start: vi.fn().mockResolvedValue(ok(undefined)),
@@ -108,14 +111,40 @@ function makeRuntime(history: readonly Message[]): BotRuntime {
     sendCard: vi.fn(),
     patchCard: vi.fn(),
     fetchHistory: vi.fn().mockResolvedValue(ok({ messages: history, hasMore: false })),
+    fetchMessage: vi
+      .fn()
+      .mockImplementation(
+        fetchMessageOverride ?? (async (id: string) =>
+          err(makeError(ErrorCode.FEISHU_API_ERROR, `unexpected fetchMessage call: ${id}`))),
+      ),
   } as unknown as BotRuntime;
 }
 
+/**
+ * askStructured 现在被调两次：
+ *   1) lite model 跑「相关性预筛」(RelevanceJudgmentSchema) → keep all by default
+ *   2) pro  model 跑「主提取」(RequirementDocSchema) → 返回 MOCK_DOC
+ * mock 用 opts.model 区分调用方
+ */
 function makeLLM(doc = MOCK_DOC): LLMClient {
   return {
     ask: vi.fn(),
     chat: vi.fn(),
-    askStructured: vi.fn().mockResolvedValue(ok(doc)),
+    askStructured: vi
+      .fn()
+      .mockImplementation(
+        async (
+          _prompt: string,
+          _schema: unknown,
+          opts?: { model?: 'lite' | 'pro' },
+        ) => {
+          if (opts?.model === 'lite') {
+            // 相关性预筛默认全 keep — 让现有断言（关注 prompt 内容）继续通过
+            return ok({ results: [] });
+          }
+          return ok(doc);
+        },
+      ),
   } as unknown as LLMClient;
 }
 
@@ -123,22 +152,37 @@ function makeCardBuilder(): CardBuilder {
   return { build: vi.fn().mockReturnValue(MOCK_CARD) };
 }
 
+/** 测试 helper：拿主提取（model: 'pro'）那次 askStructured 调用的 prompt。 */
+function mainExtractionPrompt(askStructured: ReturnType<typeof vi.fn>): string {
+  const proCall = askStructured.mock.calls.find(
+    (c) => (c[2] as { model?: string } | undefined)?.model === 'pro',
+  );
+  if (!proCall) throw new Error('main extraction (model=pro) askStructured call not found');
+  return proCall[0] as string;
+}
+
 interface CtxOpts {
   readonly history?: readonly Message[];
   readonly readContentByToken?: Record<string, string>;
+  /** 模拟 BotRuntime.fetchMessage —— 主要用于 merge_forward 展开测试 */
+  readonly fetchMessageById?: Record<string, readonly Message[]>;
   readonly overrides?: Partial<SkillContext>;
 }
 
 function makeCtx(event: BotEvent, opts: CtxOpts = {}): SkillContext {
   const history = opts.history ?? [];
   const readContentByToken = opts.readContentByToken ?? {};
+  const fetchMessageById = opts.fetchMessageById ?? {};
   const readContent = vi.fn().mockImplementation(async (token: string) => {
     if (token in readContentByToken) return ok(readContentByToken[token]!);
     return err(makeError(ErrorCode.FEISHU_API_ERROR, `unknown token in test: ${token}`));
   });
   return {
     event,
-    runtime: makeRuntime(history),
+    runtime: makeRuntime(history, async (id: string) => {
+      if (id in fetchMessageById) return ok({ messages: fetchMessageById[id]! });
+      return err(makeError(ErrorCode.FEISHU_API_ERROR, `unknown messageId in test: ${id}`));
+    }),
     llm: makeLLM(),
     bitable: {
       find: vi.fn(),
@@ -236,15 +280,15 @@ describe('requirementDocSkill.run() — multi-turn conversation scenario', () =>
     const ctx = makeCtx(makeEvent('整理一下项目需求吧'), { history: SCENARIO_MULTI_TURN });
     await requirementDocSkill.run(ctx);
 
-    const [prompt] = (ctx.llm.askStructured as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    const prompt = mainExtractionPrompt(ctx.llm.askStructured as ReturnType<typeof vi.fn>);
     // 五轮对话的发言人 + 关键内容都进了 prompt
     expect(prompt).toContain('[产品经理]:');
     expect(prompt).toContain('[开发]:');
     expect(prompt).toContain('项目协作助手');
     expect(prompt).toContain('飞书 Docx');
     expect(prompt).toContain('多端');
-    // 多轮场景下不包含「关联文档」section
-    expect(prompt).not.toContain('关联文档：');
+    // 多轮场景下不包含「关联文档（主要依据）」段落
+    expect(prompt).not.toContain('关联文档（**主要依据**）');
   });
 });
 
@@ -261,8 +305,8 @@ describe('requirementDocSkill.run() — single doc link scenario', () => {
 
     expect(ctx.docx.readContent).toHaveBeenCalledWith(SCENARIO_DOC_LINK_DOCTOKEN, 'doc');
 
-    const [prompt] = (ctx.llm.askStructured as ReturnType<typeof vi.fn>).mock.calls[0]!;
-    expect(prompt).toContain('关联文档：');
+    const prompt = mainExtractionPrompt(ctx.llm.askStructured as ReturnType<typeof vi.fn>);
+    expect(prompt).toContain('关联文档');
     expect(prompt).toContain(SCENARIO_DOC_LINK_BODY.split('\n')[0]!); // 「项目名称：飞书 AI 项目协作助手」
     expect(prompt).toContain('https://feishu.cn/docx/doxcnPRDABCDEF');
   });
@@ -314,17 +358,208 @@ describe('requirementDocSkill.run() — combo (chat + linked wiki) scenario', ()
 
     expect(ctx.docx.readContent).toHaveBeenCalledWith(SCENARIO_COMBO_WIKITOKEN, 'wiki');
 
-    const [prompt] = (ctx.llm.askStructured as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    const prompt = mainExtractionPrompt(ctx.llm.askStructured as ReturnType<typeof vi.fn>);
     // 聊天部分
     expect(prompt).toContain('我整理了下我们想做的东西');
     expect(prompt).toContain('@bot 能帮整理成 PRD 吗');
     // wiki 正文
-    expect(prompt).toContain('关联文档：');
+    expect(prompt).toContain('关联文档');
     expect(prompt).toContain('项目方案 v3');
   });
 });
 
 // ─── run() — 错误路径 ───────────────────────────────────────────────────────
+
+// ─── run() — 相关性预筛（lite）───────────────────────────────────────────────
+
+describe('requirementDocSkill.run() — relevance pre-filter', () => {
+  it('lite filter is called first; only relevant items reach the main extraction', async () => {
+    // 群里同时有：
+    //   m0: 跟当前触发无关的 K12 备课助手讨论
+    //   m1: 跟当前触发无关的 bot 自检消息
+    //   m2: 跟当前触发相关的协作 Bot 真实需求
+    //   d0: 跟当前触发相关的协作 Bot wiki 正文
+    const polluted: readonly Message[] = [
+      makeMessage('K12 备课助手要支持数学语文', { sender: { userId: 'ou_other', name: '别人' } }),
+      makeMessage('[diagnostic ping] bot self-test, ignore', {
+        sender: { userId: 'ou_app', name: 'Lark Loom' },
+      }),
+      makeMessage('我们要做一个项目协作 Bot，自动整理需求', {
+        sender: { userId: 'ou_pm', name: '产品经理' },
+      }),
+      makeMessage('详情见 https://feishu.cn/docx/doxRELEVANT', {
+        sender: { userId: 'ou_pm', name: '产品经理' },
+      }),
+    ];
+    const RELEVANT_DOC_BODY = '项目协作 Bot 详细需求：自动从群聊提取需求 / 推 PPT 初稿。';
+
+    const ctx = makeCtx(makeEvent('整理下项目需求'), {
+      history: polluted,
+      readContentByToken: { doxRELEVANT: RELEVANT_DOC_BODY },
+      overrides: {
+        llm: {
+          ask: vi.fn(),
+          chat: vi.fn(),
+          askStructured: vi
+            .fn()
+            .mockImplementation(
+              async (
+                _prompt: string,
+                _schema: unknown,
+                opts?: { model?: 'lite' | 'pro' },
+              ) => {
+                if (opts?.model === 'lite') {
+                  // lite 预筛：只保留 m2 + d0
+                  return ok({
+                    results: [
+                      { id: 'm0', keep: false },
+                      { id: 'm1', keep: false },
+                      { id: 'm2', keep: true },
+                      { id: 'd0', keep: true },
+                    ],
+                  });
+                }
+                return ok(MOCK_DOC);
+              },
+            ),
+        } as unknown as LLMClient,
+      },
+    });
+
+    await requirementDocSkill.run(ctx);
+
+    const askStructured = ctx.llm.askStructured as ReturnType<typeof vi.fn>;
+    // 第一次调用必须是 lite 预筛
+    expect(askStructured.mock.calls[0]?.[2]).toEqual(expect.objectContaining({ model: 'lite' }));
+    // 主提取拿到的 prompt：含 keep=true 的 m2 + d0，不含被过滤掉的 m0 / m1
+    const proPrompt = mainExtractionPrompt(askStructured);
+    expect(proPrompt).toContain('我们要做一个项目协作 Bot');
+    expect(proPrompt).toContain(RELEVANT_DOC_BODY);
+    expect(proPrompt).not.toContain('K12 备课助手要支持数学语文');
+    expect(proPrompt).not.toContain('diagnostic ping');
+  });
+
+  it('falls back to full context when lite filter errors out', async () => {
+    const ctx = makeCtx(makeEvent('整理下项目需求'), {
+      history: SCENARIO_MULTI_TURN,
+      overrides: {
+        llm: {
+          ask: vi.fn(),
+          chat: vi.fn(),
+          askStructured: vi
+            .fn()
+            .mockImplementation(
+              async (
+                _prompt: string,
+                _schema: unknown,
+                opts?: { model?: 'lite' | 'pro' },
+              ) => {
+                if (opts?.model === 'lite') {
+                  return err(makeError(ErrorCode.LLM_TIMEOUT, 'lite filter timed out'));
+                }
+                return ok(MOCK_DOC);
+              },
+            ),
+        } as unknown as LLMClient,
+      },
+    });
+
+    const result = await requirementDocSkill.run(ctx);
+    expect(result.ok).toBe(true);
+    expect(ctx.logger.warn).toHaveBeenCalledWith(
+      'requirementDoc: relevance filter failed, falling back to full context',
+      expect.objectContaining({ code: ErrorCode.LLM_TIMEOUT }),
+    );
+    // 主提取仍正常拿到全部历史
+    const proPrompt = mainExtractionPrompt(ctx.llm.askStructured as ReturnType<typeof vi.fn>);
+    expect(proPrompt).toContain('[产品经理]:');
+    expect(proPrompt).toContain('飞书 Docx');
+  });
+});
+
+// ─── run() — merge_forward 展开 ────────────────────────────────────────────────
+
+describe('requirementDocSkill.run() — merge_forward expansion', () => {
+  it('expands a forwarded chat history card into its inner text messages before LLM', async () => {
+    const FORWARD_ID = 'om_x_forward_1';
+    const FORWARDED_INNER: readonly Message[] = [
+      makeMessage('Merged and Forwarded Message', {
+        messageId: FORWARD_ID,
+        contentType: 'merge_forward' as Message['contentType'],
+        text: '',
+      }),
+      // 嵌套子消息：来自之前另一个群的真实需求讨论
+      makeMessage('开发一个面向 K12 教师的 AI 备课助手，自动生成教学目标', {
+        messageId: 'om_inner_1',
+        sender: { userId: 'ou_pm', name: '产品经理' },
+      }),
+      makeMessage('目标用户是 K12 教师，先支持数学和语文学科', {
+        messageId: 'om_inner_2',
+        sender: { userId: 'ou_pm', name: '产品经理' },
+      }),
+    ];
+
+    const trigger = makeMessage('以上是我们本次项目的需求', {
+      sender: { userId: 'ou_pm', name: '产品经理' },
+    });
+
+    // history：bot 拉到的就是【父 merge_forward】+【触发消息】（嵌套子要走 fetchMessage）
+    const historyAsBotSeesIt: readonly Message[] = [FORWARDED_INNER[0]!, trigger];
+
+    const ctx = makeCtx(
+      { type: 'message', payload: trigger },
+      {
+        history: historyAsBotSeesIt,
+        // fetchMessage(om_x_forward_1) → 返回父 + 2 个嵌套子
+        fetchMessageById: { [FORWARD_ID]: FORWARDED_INNER },
+      },
+    );
+
+    await requirementDocSkill.run(ctx);
+
+    // bot 调了 fetchMessage 展开
+    expect(ctx.runtime.fetchMessage).toHaveBeenCalledWith(FORWARD_ID);
+
+    // 嵌套子的真实内容进了主提取 prompt（K12 备课助手细节）
+    const proPrompt = mainExtractionPrompt(ctx.llm.askStructured as ReturnType<typeof vi.fn>);
+    expect(proPrompt).toContain('K12 教师的 AI 备课助手');
+    expect(proPrompt).toContain('数学和语文');
+    // 「Merged and Forwarded Message」噪音字符串不应再出现在 prompt 里
+    expect(proPrompt).not.toContain('Merged and Forwarded Message');
+  });
+
+  it('falls back to keeping merge_forward as-is when fetchMessage fails', async () => {
+    const FORWARD_ID = 'om_x_forward_2';
+    const trigger = makeMessage('以上是我们本次项目的需求', {
+      sender: { userId: 'ou_pm', name: '产品经理' },
+    });
+    const history: readonly Message[] = [
+      makeMessage('Merged and Forwarded Message', {
+        messageId: FORWARD_ID,
+        contentType: 'merge_forward' as Message['contentType'],
+        text: '',
+      }),
+      trigger,
+    ];
+
+    const ctx = makeCtx(
+      { type: 'message', payload: trigger },
+      {
+        history,
+        // 故意不在 fetchMessageById 里放 FORWARD_ID → fetchMessage 会返回 err
+      },
+    );
+
+    const result = await requirementDocSkill.run(ctx);
+
+    // 主流程不能因为 fetchMessage 失败就崩
+    expect(result.ok).toBe(true);
+    expect(ctx.logger.warn).toHaveBeenCalledWith(
+      'requirementDoc: fetchMessage failed for merge_forward; keeping as-is',
+      expect.objectContaining({ messageId: FORWARD_ID }),
+    );
+  });
+});
 
 describe('requirementDocSkill.run() — error paths', () => {
   it('returns err when fetchHistory fails; LLM and docx not called', async () => {
