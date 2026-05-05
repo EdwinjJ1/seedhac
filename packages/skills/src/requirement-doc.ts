@@ -206,10 +206,47 @@ export const requirementDocSkill: Skill = {
     const msg = ctx.event.payload as Message;
     const chatId = msg.chatId;
 
+    // 0. 立刻发一张 loading 卡片占位，让用户知道 bot 收到了 + 大约多久
+    //    跑完后用 patchCard 替换成终态卡片。中途任何失败都会 patch 成 error 卡片，
+    //    避免「文档生成中…」永远卡住。
+    const loadingCard = ctx.cardBuilder.build('docPush', {
+      docTitle: '需求文档',
+      docUrl: '',
+      docType: 'requirement',
+      isLoading: true,
+      etaSeconds: 60,
+    });
+    const loadingSent = await ctx.runtime.sendCard({ chatId, card: loadingCard });
+    if (!loadingSent.ok) {
+      // loading 卡片都发不出去，没必要继续跑后面的链路
+      return err(loadingSent.error);
+    }
+    const loadingMessageId = loadingSent.value.messageId;
+
+    // patchToError —— 任何中间步骤失败时把 loading 卡片替换成失败卡片
+    const patchToError = async (title: string, message: string): Promise<void> => {
+      const errCard = ctx.cardBuilder.build('docPush', {
+        docTitle: title,
+        docUrl: '',
+        docType: 'requirement',
+        errorMessage: message,
+      });
+      const patchRes = await ctx.runtime.patchCard({ messageId: loadingMessageId, card: errCard });
+      if (!patchRes.ok) {
+        ctx.logger.warn('requirementDoc: patch error card failed', {
+          code: patchRes.error.code,
+          message: patchRes.error.message,
+        });
+      }
+    };
+
     // a. 拉最近 20 条历史
     ctx.logger.info('requirementDoc: fetching chat history', { chatId });
     const historyResult = await ctx.runtime.fetchHistory({ chatId, pageSize: 20 });
-    if (!historyResult.ok) return err(historyResult.error);
+    if (!historyResult.ok) {
+      await patchToError('需求文档', `拉群历史失败：${historyResult.error.message}`);
+      return err(historyResult.error);
+    }
     const historyRaw = historyResult.value.messages;
 
     // a2. 展开合并转发：父原位替换为嵌套子消息
@@ -237,7 +274,10 @@ export const requirementDocSkill: Skill = {
       // pro 模型默认超时 30s 不够：拉了多条历史 + 文档正文，prompt 偏长，35–60s 是常态
       { model: 'pro', timeoutMs: 90_000 },
     );
-    if (!docResult.ok) return err(docResult.error);
+    if (!docResult.ok) {
+      await patchToError('需求文档', `LLM 提取失败：${docResult.error.message}`);
+      return err(docResult.error);
+    }
     const doc = docResult.value;
 
     // d. 序列化 markdown + 创建飞书文档
@@ -248,7 +288,10 @@ export const requirementDocSkill: Skill = {
       deliverableCount: doc.deliverables.length,
     });
     const fileResult = await ctx.docx.createFromMarkdown(doc.title, markdown);
-    if (!fileResult.ok) return err(fileResult.error);
+    if (!fileResult.ok) {
+      await patchToError(doc.title, `创建飞书文档失败：${fileResult.error.message}`);
+      return err(fileResult.error);
+    }
 
     // e. 写 memory（失败仅 warn，不阻断卡片输出）
     const memRes = await ctx.bitable.insert({
@@ -268,8 +311,8 @@ export const requirementDocSkill: Skill = {
       });
     }
 
-    // f. 推 docPush 卡片
-    const card = ctx.cardBuilder.build('docPush', {
+    // f. patch loading 卡片为最终 docPush 卡片
+    const finalCard = ctx.cardBuilder.build('docPush', {
       docTitle: doc.title,
       docUrl: fileResult.value.url,
       docType: 'requirement',
@@ -277,9 +320,19 @@ export const requirementDocSkill: Skill = {
         linkedDocs.length ? `（参考了 ${linkedDocs.length} 篇关联文档）` : ''
       }`,
     });
+    const patchRes = await ctx.runtime.patchCard({
+      messageId: loadingMessageId,
+      card: finalCard,
+    });
+    if (!patchRes.ok) {
+      ctx.logger.warn('requirementDoc: patch final card failed; final card not visible', {
+        code: patchRes.error.code,
+        message: patchRes.error.message,
+      });
+    }
 
+    // 不再返回 card —— 已经通过 patchCard 替换 loading 卡片，wiring 不需要再发一条
     return ok({
-      card,
       reasoning: `检测到需求描述，基于 ${history.length} 条群聊记录${
         linkedDocs.length ? ` + ${linkedDocs.length} 篇关联文档` : ''
       }生成需求文档「${doc.title}」`,

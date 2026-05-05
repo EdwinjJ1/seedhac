@@ -108,8 +108,11 @@ function makeRuntime(
     start: vi.fn().mockResolvedValue(ok(undefined)),
     stop: vi.fn().mockResolvedValue(undefined),
     sendText: vi.fn(),
-    sendCard: vi.fn(),
-    patchCard: vi.fn(),
+    // requirementDoc 主流程：先 sendCard loading 拿 messageId，跑完 patchCard 终态
+    sendCard: vi
+      .fn()
+      .mockResolvedValue(ok({ messageId: 'loading_msg_001', chatId: 'oc_chat_001', timestamp: 0 })),
+    patchCard: vi.fn().mockResolvedValue(ok(undefined)),
     fetchHistory: vi.fn().mockResolvedValue(ok({ messages: history, hasMore: false })),
     fetchMembers: vi.fn().mockResolvedValue(ok({ members: [] })),
     fetchMessage: vi
@@ -237,10 +240,20 @@ describe('requirementDocSkill.run() — single message scenario', () => {
     ctx = makeCtx(makeEvent('整理下项目需求'), { history: SCENARIO_SINGLE });
   });
 
-  it('returns docPush card with docType=requirement', async () => {
+  it('sends loading card first then patches it with docPush requirement card', async () => {
     const result = await requirementDocSkill.run(ctx);
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.value.card?.templateName).toBe('docPush');
+    // 不再直接返回 card —— 流程是：sendCard(loading) → ... → patchCard(final)
+    if (result.ok) expect(result.value.card).toBeUndefined();
+
+    // 先发了 loading 卡片
+    expect(ctx.cardBuilder.build).toHaveBeenCalledWith(
+      'docPush',
+      expect.objectContaining({ isLoading: true, docType: 'requirement' }),
+    );
+    expect(ctx.runtime.sendCard).toHaveBeenCalledTimes(1);
+
+    // 跑完后 patch 成终态卡片
     expect(ctx.cardBuilder.build).toHaveBeenCalledWith(
       'docPush',
       expect.objectContaining({
@@ -248,6 +261,9 @@ describe('requirementDocSkill.run() — single message scenario', () => {
         docUrl: MOCK_DOC_REF.url,
         summary: expect.not.stringContaining('参考了'),
       }),
+    );
+    expect(ctx.runtime.patchCard).toHaveBeenCalledWith(
+      expect.objectContaining({ messageId: 'loading_msg_001' }),
     );
   });
 
@@ -373,8 +389,12 @@ describe('requirementDocSkill.run() — error paths', () => {
           start: vi.fn(),
           stop: vi.fn(),
           sendText: vi.fn(),
-          sendCard: vi.fn(),
-          patchCard: vi.fn(),
+          sendCard: vi
+            .fn()
+            .mockResolvedValue(
+              ok({ messageId: 'loading_msg_001', chatId: 'oc_chat_001', timestamp: 0 }),
+            ),
+          patchCard: vi.fn().mockResolvedValue(ok(undefined)),
           fetchHistory: vi
             .fn()
             .mockResolvedValue(err(makeError(ErrorCode.FEISHU_API_ERROR, 'history fetch failed'))),
@@ -410,7 +430,16 @@ describe('requirementDocSkill.run() — error paths', () => {
     if (!result.ok) expect(result.error.code).toBe(ErrorCode.LLM_TIMEOUT);
     expect(ctx.docx.createFromMarkdown).not.toHaveBeenCalled();
     expect(ctx.bitable.insert).not.toHaveBeenCalled();
-    expect(ctx.cardBuilder.build).not.toHaveBeenCalled();
+    // loading 卡片仍然会发；但不应进入终态 card（不带 isLoading 也不带 errorMessage）
+    expect(ctx.cardBuilder.build).not.toHaveBeenCalledWith(
+      'docPush',
+      expect.objectContaining({ summary: expect.any(String), docUrl: expect.stringContaining('feishu') }),
+    );
+    // 应该 patch 成 error 卡片
+    expect(ctx.cardBuilder.build).toHaveBeenCalledWith(
+      'docPush',
+      expect.objectContaining({ errorMessage: expect.stringContaining('llm timed out') }),
+    );
   });
 
   it('returns err when docx.createFromMarkdown fails; memory not written, card not built', async () => {
@@ -435,7 +464,15 @@ describe('requirementDocSkill.run() — error paths', () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe(ErrorCode.FEISHU_API_ERROR);
     expect(ctx.bitable.insert).not.toHaveBeenCalled();
-    expect(ctx.cardBuilder.build).not.toHaveBeenCalled();
+    // 同上：loading + error 卡片会 build；但不应进入「文档已生成」终态
+    expect(ctx.cardBuilder.build).not.toHaveBeenCalledWith(
+      'docPush',
+      expect.objectContaining({ docUrl: expect.stringContaining('feishu') }),
+    );
+    expect(ctx.cardBuilder.build).toHaveBeenCalledWith(
+      'docPush',
+      expect.objectContaining({ errorMessage: expect.stringContaining('docx create failed') }),
+    );
   });
 
   it('still returns ok when bitable.insert fails (degrades gracefully)', async () => {
