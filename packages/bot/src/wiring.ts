@@ -10,7 +10,11 @@ export const intentToSkill: Partial<Record<RouteIntent, SkillName>> = {
   qa: 'qa',
   meetingNotes: 'summary',
   slides: 'slides',
+  requirementDoc: 'requirementDoc',
 };
+
+/** 仅做 Bitable 侧效记录、不触发 skill 的 intent。 */
+const SIDE_EFFECT_INTENTS = new Set<RouteIntent>(['taskAssignment', 'progressUpdate']);
 
 export interface HarnessConfig {
   readonly promptCache: SystemPromptCache;
@@ -44,6 +48,31 @@ export async function handleEvent(
 
   // 非 @mention：保持原有 Skill 路由
   const intent = router.route(msg);
+
+  // taskAssignment / progressUpdate 暂无对应 skill，仅写入 Bitable memory 供后续检索
+  if (SIDE_EFFECT_INTENTS.has(intent)) {
+    void ctx.bitable
+      .insert({
+        table: 'memory',
+        row: {
+          chatId: msg.chatId,
+          type: intent,
+          content: msg.text,
+          timestamp: Date.now(),
+        },
+      })
+      .then((res) => {
+        if (!res.ok) {
+          logger.warn('bitable insert failed', {
+            intent,
+            code: res.error.code,
+            message: res.error.message,
+          });
+        }
+      });
+    return;
+  }
+
   const skillName = intentToSkill[intent];
   if (!skillName) return;
   const skill = skills[skillName];
