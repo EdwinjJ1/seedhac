@@ -84,14 +84,26 @@ describe('qa card', () => {
     const card = larkCardBuilder.build('qa', {
       question: '复赛截止日期是什么时候？',
       answer: '复赛日期为 **2026-05-06**。',
-      sources: [{ title: 'README', kind: 'wiki', snippet: '时间节点表' }],
-      buttons: [{ text: '查看原文', value: { action: 'open', target: 'readme' }, variant: 'primary' }],
+      sources: [
+        {
+          title: '群聊历史消息',
+          kind: 'chat',
+          snippet: '复赛日期是 2026-05-06',
+          authorName: 'Antares',
+          timestamp: Date.parse('2026-05-03T10:30:00+08:00'),
+        },
+        { title: 'README', kind: 'wiki', snippet: '时间节点表' },
+      ],
+      buttons: [
+        { text: '查看原文', value: { action: 'open', target: 'readme' }, variant: 'primary' },
+      ],
     });
     expect(card.templateName).toBe('qa');
     const j = json(card);
     expect(noPlaceholders(j)).toBe(true);
     expect(j).toContain('复赛截止日期');
     expect(j).toContain('2026-05-06');
+    expect(j).toContain('Antares');
     expect(j).toContain('README');
   });
 });

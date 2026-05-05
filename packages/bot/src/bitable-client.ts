@@ -52,6 +52,24 @@ function toLarkFields(row: BitableRow): LarkFields {
   return row as unknown as LarkFields;
 }
 
+function escapeFieldName(fieldName: string): string {
+  return fieldName.replaceAll('\\', '\\\\').replaceAll(']', '\\]');
+}
+
+function formatFilterValue(value: unknown): string {
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  throw new Error(`unsupported where value type: ${typeof value}`);
+}
+
+function whereToFilter(where: Record<string, unknown>): string | undefined {
+  const clauses = Object.entries(where).map(
+    ([field, value]) => `CurrentValue.[${escapeFieldName(field)}]=${formatFilterValue(value)}`,
+  );
+  if (clauses.length === 0) return undefined;
+  return clauses.length === 1 ? clauses[0]! : `AND(${clauses.join(',')})`;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -128,6 +146,19 @@ export class LarkBitableClient implements BitableClient {
     return this.config.tableIds[kind];
   }
 
+  private ensureConfigured(kind: BitableTableKind): Result<{ appToken: string; tableId: string }> {
+    const tableId = this.tid(kind);
+    if (!this.config.appToken || !tableId) {
+      return err(
+        makeError(ErrorCode.CONFIG_MISSING, `bitable ${kind} table is not configured`, undefined, {
+          hasAppToken: Boolean(this.config.appToken),
+          hasTableId: Boolean(tableId),
+        }),
+      );
+    }
+    return ok({ appToken: this.config.appToken, tableId });
+  }
+
   /** 每次飞书 API 调用都经过限流 + 重试 */
   private async call<T>(fn: () => Promise<T>): Promise<T> {
     await this.limiter.acquire();
@@ -135,15 +166,25 @@ export class LarkBitableClient implements BitableClient {
   }
 
   async find(params: FindParams): Promise<Result<FindResult>> {
-    const tableId = this.tid(params.table);
+    const configResult = this.ensureConfigured(params.table);
+    if (!configResult.ok) return configResult;
+    const { appToken, tableId } = configResult.value;
+    let filter = params.filter;
+    if (filter === undefined && params.where !== undefined) {
+      try {
+        filter = whereToFilter(params.where);
+      } catch (e) {
+        return err(makeError(ErrorCode.INVALID_INPUT, 'find: invalid where clause', e));
+      }
+    }
     try {
       const res = await this.call(() =>
         this.larkClient.bitable.appTableRecord.list({
-          path: { app_token: this.config.appToken, table_id: tableId },
+          path: { app_token: appToken, table_id: tableId },
           params: {
             page_size: params.pageSize ?? 20,
             ...(params.pageToken !== undefined && { page_token: params.pageToken }),
-            ...(params.filter !== undefined && { filter: params.filter }),
+            ...(filter !== undefined && { filter }),
           },
         }),
       );
@@ -169,11 +210,13 @@ export class LarkBitableClient implements BitableClient {
   }
 
   async insert(params: InsertParams): Promise<Result<RecordRef>> {
-    const tableId = this.tid(params.table);
+    const configResult = this.ensureConfigured(params.table);
+    if (!configResult.ok) return configResult;
+    const { appToken, tableId } = configResult.value;
     try {
       const res = await this.call(() =>
         this.larkClient.bitable.appTableRecord.create({
-          path: { app_token: this.config.appToken, table_id: tableId },
+          path: { app_token: appToken, table_id: tableId },
           data: { fields: toLarkFields(params.row) },
         }),
       );
@@ -190,7 +233,9 @@ export class LarkBitableClient implements BitableClient {
   }
 
   async batchInsert(params: BatchInsertParams): Promise<Result<readonly RecordRef[]>> {
-    const tableId = this.tid(params.table);
+    const configResult = this.ensureConfigured(params.table);
+    if (!configResult.ok) return configResult;
+    const { appToken, tableId } = configResult.value;
     const chunkSize = Math.min(params.batchSize ?? 500, 500);
     const rows = [...params.rows];
     const results: RecordRef[] = [];
@@ -200,7 +245,7 @@ export class LarkBitableClient implements BitableClient {
         const chunk = rows.slice(i, i + chunkSize);
         const res = await this.call(() =>
           this.larkClient.bitable.appTableRecord.batchCreate({
-            path: { app_token: this.config.appToken, table_id: tableId },
+            path: { app_token: appToken, table_id: tableId },
             data: {
               records: chunk.map((row) => ({ fields: toLarkFields(row) })),
             },
@@ -223,12 +268,14 @@ export class LarkBitableClient implements BitableClient {
   }
 
   async update(params: UpdateParams): Promise<Result<void>> {
-    const tableId = this.tid(params.table);
+    const configResult = this.ensureConfigured(params.table);
+    if (!configResult.ok) return configResult;
+    const { appToken, tableId } = configResult.value;
     try {
       await this.call(() =>
         this.larkClient.bitable.appTableRecord.update({
           path: {
-            app_token: this.config.appToken,
+            app_token: appToken,
             table_id: tableId,
             record_id: params.recordId,
           },
@@ -242,12 +289,14 @@ export class LarkBitableClient implements BitableClient {
   }
 
   async delete(params: DeleteParams): Promise<Result<void>> {
-    const tableId = this.tid(params.table);
+    const configResult = this.ensureConfigured(params.table);
+    if (!configResult.ok) return configResult;
+    const { appToken, tableId } = configResult.value;
     try {
       await this.call(() =>
         this.larkClient.bitable.appTableRecord.delete({
           path: {
-            app_token: this.config.appToken,
+            app_token: appToken,
             table_id: tableId,
             record_id: params.recordId,
           },
@@ -279,6 +328,31 @@ export class LarkBitableClient implements BitableClient {
       return ok(undefined);
     } catch (e) {
       return err(makeError(ErrorCode.FEISHU_API_ERROR, 'link failed', e));
+    }
+  }
+
+  async readTable(appToken: string, tableId: string, maxRows = 50): Promise<Result<string>> {
+    try {
+      const res = await this.call(() =>
+        this.larkClient.bitable.appTableRecord.list({
+          path: { app_token: appToken, table_id: tableId },
+          params: { page_size: Math.min(maxRows, 100) },
+        }),
+      );
+      if (!res.data?.items?.length) {
+        return ok('（多维表格暂无记录）');
+      }
+      const rows = res.data.items;
+      const allKeys = [...new Set(rows.flatMap((r) => Object.keys(r.fields as object)))];
+      const header = allKeys.join(' | ');
+      const lines = rows.map((r) => {
+        const fields = r.fields as Record<string, unknown>;
+        return allKeys.map((k) => String(fields[k] ?? '')).join(' | ');
+      });
+      return ok([header, ...lines].join('\n'));
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return err(makeError(ErrorCode.FEISHU_API_ERROR, `readTable error: ${msg}`, e));
     }
   }
 }
