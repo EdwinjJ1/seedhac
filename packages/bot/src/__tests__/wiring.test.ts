@@ -255,6 +255,33 @@ describe('handleEvent wiring', () => {
     );
   });
 
+  it('schedule event sends selected skill output to the scheduled chat', async () => {
+    const runtime = makeRuntime();
+    const skill: Skill = {
+      ...qaSkill,
+      name: 'weekly',
+      match: vi.fn().mockReturnValue(true),
+      run: vi
+        .fn()
+        .mockResolvedValue(ok({ card: { templateName: 'weekly', content: { weekly: true } } })),
+    };
+    const ctx = makeCtx(
+      {
+        type: 'schedule',
+        payload: { chatId: 'oc_chat1', skillName: 'weekly', timestamp: 123 },
+      },
+      runtime,
+    );
+
+    await handleEvent(ctx, router, { weekly: skill } as unknown as Record<SkillName, Skill>);
+
+    expect(skill.run).toHaveBeenCalledOnce();
+    expect(runtime.sendCard).toHaveBeenCalledWith({
+      chatId: 'oc_chat1',
+      card: { templateName: 'weekly', content: { weekly: true } },
+    });
+  });
+
   // 6. intent='silent'（非 qa/meetingNotes 等消息）→ 不触发任何 skill
   it('silent intent → no skill triggered', async () => {
     const mockSkill: Skill = {

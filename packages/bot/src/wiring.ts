@@ -88,10 +88,11 @@ async function runSkill(ctx: SkillContext, skill: Skill): Promise<void> {
     return;
   }
   await writeSkillMemory(ctx, skill, result.value);
-  if (event.type !== 'message') return;
+  const chatId = deliveryChatId(ctx);
+  if (!chatId) return;
   const { card, text } = result.value;
   if (card) {
-    const sendResult = await runtime.sendCard({ chatId: event.payload.chatId, card });
+    const sendResult = await runtime.sendCard({ chatId, card });
     if (!sendResult.ok) {
       logger.error('send card failed', {
         code: sendResult.error.code,
@@ -101,7 +102,7 @@ async function runSkill(ctx: SkillContext, skill: Skill): Promise<void> {
     }
   }
   if (text) {
-    const sendResult = await runtime.sendText({ chatId: event.payload.chatId, text });
+    const sendResult = await runtime.sendText({ chatId, text });
     if (!sendResult.ok) {
       logger.error('send text failed', {
         code: sendResult.error.code,
@@ -110,7 +111,7 @@ async function runSkill(ctx: SkillContext, skill: Skill): Promise<void> {
       return;
     }
   }
-  logger.info(`skill=${skill.name} replied to chat=${event.payload.chatId}`);
+  logger.info(`skill=${skill.name} replied to chat=${chatId}`);
 }
 
 async function writeSkillMemory(
@@ -226,6 +227,15 @@ function summarizeSkillResult(
 function safeMemoryKey(raw: string): string {
   const key = raw.replace(/[^A-Za-z0-9_:.-]+/g, '_').slice(0, 120);
   return key.length > 0 ? key : 'unknown';
+}
+
+function deliveryChatId(ctx: SkillContext): string | null {
+  const { event } = ctx;
+  if (event.type === 'message' || event.type === 'cardAction' || event.type === 'schedule') {
+    return event.payload.chatId;
+  }
+  if (event.type === 'botJoinedChat') return event.payload.chatId;
+  return null;
 }
 
 async function handleWithHarness(
