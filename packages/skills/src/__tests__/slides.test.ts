@@ -325,7 +325,7 @@ describe('slidesSkill.run() — happy path', () => {
 // ─── run() — error paths ──────────────────────────────────────────────────────
 
 describe('slidesSkill.run() — error paths', () => {
-  it('returns err when fetchHistory fails', async () => {
+  it('returns err and patches loading card when fetchHistory fails', async () => {
     const ctx = makeCtx(makeEvent('做个ppt'), {
       runtime: {
         ...makeRuntime(),
@@ -337,6 +337,15 @@ describe('slidesSkill.run() — error paths', () => {
     const result = await slidesSkill.run(ctx);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe(ErrorCode.FEISHU_API_ERROR);
+    expect(ctx.cardBuilder.build).toHaveBeenCalledWith(
+      'slides',
+      expect.objectContaining({
+        errorMessage: expect.stringContaining('history fetch failed'),
+      }),
+    );
+    expect(ctx.runtime.patchCard).toHaveBeenCalledWith(
+      expect.objectContaining({ messageId: 'r2' }),
+    );
   });
 
   it('returns err when slides client is missing', async () => {
@@ -347,7 +356,7 @@ describe('slidesSkill.run() — error paths', () => {
     if (!result.ok) expect(result.error.code).toBe(ErrorCode.CONFIG_MISSING);
   });
 
-  it('returns err when LLM times out', async () => {
+  it('returns err and patches loading card when LLM times out', async () => {
     const ctx = makeCtx(makeEvent('做个ppt'), {
       llm: {
         ask: vi.fn(),
@@ -360,9 +369,18 @@ describe('slidesSkill.run() — error paths', () => {
     const result = await slidesSkill.run(ctx);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe(ErrorCode.LLM_TIMEOUT);
+    expect(ctx.cardBuilder.build).toHaveBeenCalledWith(
+      'slides',
+      expect.objectContaining({
+        errorMessage: expect.stringContaining('llm timed out'),
+      }),
+    );
+    expect(ctx.runtime.patchCard).toHaveBeenCalledWith(
+      expect.objectContaining({ messageId: 'r2' }),
+    );
   });
 
-  it('returns err when slides.createFromOutline fails', async () => {
+  it('returns err and patches loading card when slides.createFromOutline fails', async () => {
     const ctx = makeCtx(makeEvent('做个ppt'), {
       slides: {
         createFromOutline: vi
@@ -373,6 +391,15 @@ describe('slidesSkill.run() — error paths', () => {
     const result = await slidesSkill.run(ctx);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe(ErrorCode.FEISHU_API_ERROR);
+    expect(ctx.cardBuilder.build).toHaveBeenCalledWith(
+      'slides',
+      expect.objectContaining({
+        errorMessage: expect.stringContaining('slides create failed'),
+      }),
+    );
+    expect(ctx.runtime.patchCard).toHaveBeenCalledWith(
+      expect.objectContaining({ messageId: 'r2' }),
+    );
   });
 
   it('proceeds when fetchMembers fails and still creates assignment doc', async () => {
@@ -441,7 +468,7 @@ describe('slidesSkill.run() — error paths', () => {
     );
   });
 
-  it('does not build final cards when slides creation fails', async () => {
+  it('does not build final/docPush cards when slides creation fails', async () => {
     const cardBuilder = makeCardBuilder();
     const ctx = makeCtx(makeEvent('做个ppt'), {
       slides: {
@@ -452,11 +479,20 @@ describe('slidesSkill.run() — error paths', () => {
       cardBuilder,
     });
     await slidesSkill.run(ctx);
-    expect(cardBuilder.build).toHaveBeenCalledTimes(1);
-    expect(cardBuilder.build).toHaveBeenCalledWith(
+
+    // build 调用：1) loading card 2) error patch card；不应再 build 成功态卡或 docPush 卡
+    expect(cardBuilder.build).toHaveBeenCalledTimes(2);
+    expect(cardBuilder.build).toHaveBeenNthCalledWith(
+      1,
       'slides',
       expect.objectContaining({ isLoading: true }),
     );
+    expect(cardBuilder.build).toHaveBeenNthCalledWith(
+      2,
+      'slides',
+      expect.objectContaining({ errorMessage: expect.stringContaining('slides create failed') }),
+    );
+    expect(cardBuilder.build).not.toHaveBeenCalledWith('docPush', expect.anything());
   });
 });
 

@@ -110,7 +110,10 @@ async function runSlides(ctx: Parameters<Skill['run']>[0], msg: Message): Return
   ]);
 
   // a. process fetchHistory
-  if (!historyResult.ok) return err(historyResult.error);
+  if (!historyResult.ok) {
+    await patchErrorCard(ctx, loadingMessageId, '幻灯片生成', historyResult.error.message);
+    return err(historyResult.error);
+  }
   const history = historyResult.value.messages;
 
   // d. process fetchMembers
@@ -141,7 +144,10 @@ async function runSlides(ctx: Parameters<Skill['run']>[0], msg: Message): Return
     OutlineSchema,
     { model: 'pro', timeoutMs: 90_000, maxTokens: 2600, temperature: 0.2 },
   );
-  if (!outlineResult.ok) return err(outlineResult.error);
+  if (!outlineResult.ok) {
+    await patchErrorCard(ctx, loadingMessageId, '幻灯片生成', outlineResult.error.message);
+    return err(outlineResult.error);
+  }
   const outline = outlineResult.value;
 
   // e. 汇报分工从 outline.presenterName 生成；LLM 在一次大纲调用里已根据聊天贡献分配负责人。
@@ -163,7 +169,10 @@ async function runSlides(ctx: Parameters<Skill['run']>[0], msg: Message): Return
   ]);
 
   // f. handle slides creation result
-  if (!slidesResult.ok) return err(slidesResult.error);
+  if (!slidesResult.ok) {
+    await patchErrorCard(ctx, loadingMessageId, outline.title, slidesResult.error.message);
+    return err(slidesResult.error);
+  }
 
   // g. handle assignment doc creation result
   if (!assignmentDocResult.ok) {
