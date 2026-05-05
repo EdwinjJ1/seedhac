@@ -87,7 +87,7 @@ async function runSkill(ctx: SkillContext, skill: Skill): Promise<void> {
     });
     return;
   }
-  await writeSkillMemory(ctx, skill, result.value);
+  writeSkillMemory(ctx, skill, result.value);
   const chatId = deliveryChatId(ctx);
   if (!chatId) return;
   const { card, text } = result.value;
@@ -114,14 +114,25 @@ async function runSkill(ctx: SkillContext, skill: Skill): Promise<void> {
   logger.info(`skill=${skill.name} replied to chat=${chatId}`);
 }
 
-async function writeSkillMemory(
+function writeSkillMemory(
+  ctx: SkillContext,
+  skill: Skill,
+  result: { readonly card?: unknown; readonly text?: string; readonly reasoning?: string },
+): void {
+  const memoryStore = ctx.memoryStore;
+  if (!memoryStore) return;
+  if (skill.name === 'weekly') return;
+
+  void writeSkillMemoryNow(ctx, skill, result);
+}
+
+async function writeSkillMemoryNow(
   ctx: SkillContext,
   skill: Skill,
   result: { readonly card?: unknown; readonly text?: string; readonly reasoning?: string },
 ): Promise<void> {
   const memoryStore = ctx.memoryStore;
   if (!memoryStore) return;
-
   const { chatId, userId, eventKey } = memoryEventIdentity(ctx);
   const now = Date.now();
   const summary = summarizeSkillResult(skill, result);
@@ -255,11 +266,12 @@ async function handleWithHarness(
     docsRoot: harness.docsRoot,
   });
 
-  const skillChoices = [...registeredSkillNames(skills), 'silent'].join('|');
+  const skillChoices = [...registeredSkillNames(skills), 'silent'].join(' | ');
   const decisionInstruction =
     '请按需调用 skill.list / skill.read / memory.search，然后只输出 JSON：' +
-    `{"skill":"${skillChoices}","reason":"一句话原因","args":{}}。` +
-    '如果不应处理，skill 必须是 "silent"。不要输出 JSON 以外的文字。';
+    `{"skill":"<以下之一: ${skillChoices}>","reason":"一句话原因","args":{}}。` +
+    `skill 字段必须是 ${skillChoices} 中的一个，不要输出其他值。` +
+    '不要输出 JSON 以外的文字。';
 
   const messages: ChatMessage[] = [
     { role: 'system', content: systemPrompt },
@@ -269,7 +281,6 @@ async function handleWithHarness(
   const result = await llm.chatWithTools(messages, {
     tools: getLLMTools(),
     executor,
-    maxToolCallRounds: 5,
   });
 
   if (!result.ok) {
@@ -306,6 +317,9 @@ async function handleWithHarness(
     reason: decision.reason,
     args: decision.args ?? {},
   });
+  // Intentionally skip skill.match(): the harness uses LLM + memory context to
+  // select the skill, which is more flexible than keyword routing. The skills'
+  // run() methods do not assume match() was called first.
   await runSkill(ctx, skill);
   return true;
 }
@@ -318,18 +332,16 @@ function parseHarnessDecision(
   try {
     const parsed = JSON.parse(trimmed) as { skill?: unknown; reason?: unknown; args?: unknown };
     if (parsed.skill === 'silent') {
-      return {
-        skill: 'silent',
-        ...(typeof parsed.reason === 'string' && { reason: parsed.reason }),
-        ...(isRecord(parsed.args) && { args: parsed.args }),
-      };
+      let d: HarnessDecision = { skill: 'silent' };
+      if (typeof parsed.reason === 'string') d = { ...d, reason: parsed.reason };
+      if (isRecord(parsed.args)) d = { ...d, args: parsed.args };
+      return d;
     }
     if (typeof parsed.skill !== 'string' || !isSkillName(parsed.skill, skills)) return null;
-    return {
-      skill: parsed.skill,
-      ...(typeof parsed.reason === 'string' && { reason: parsed.reason }),
-      ...(isRecord(parsed.args) && { args: parsed.args }),
-    };
+    let d: HarnessDecision = { skill: parsed.skill };
+    if (typeof parsed.reason === 'string') d = { ...d, reason: parsed.reason };
+    if (isRecord(parsed.args)) d = { ...d, args: parsed.args };
+    return d;
   } catch {
     return null;
   }

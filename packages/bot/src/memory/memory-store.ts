@@ -258,9 +258,6 @@ export class MemoryStore implements IMemoryStore {
 
       for (const row of findResult.value.records) {
         const memory = this.rowToMemory(row);
-        if (opts.minImportance !== undefined && memory.importance < opts.minImportance) {
-          continue;
-        }
         records.push(memory);
         if (records.length >= limit) return ok(records);
       }
@@ -558,6 +555,9 @@ export class MemoryStore implements IMemoryStore {
     }
     if (opts.sourceSkill !== undefined) {
       parts.push(`CurrentValue.[source_skill] = "${this.escapeFilterValue(opts.sourceSkill)}"`);
+    }
+    if (opts.minImportance !== undefined) {
+      parts.push(`CurrentValue.[importance] >= ${opts.minImportance}`);
     }
     if (parts.length === 0) return undefined;
     if (parts.length === 1) return parts[0];

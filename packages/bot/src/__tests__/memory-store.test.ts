@@ -34,6 +34,11 @@ class FakeBitable implements BitableClient {
     for (const [, field, expected] of eqMatches) {
       if (String(row.fields[field!]) !== expected) return false;
     }
+    const gteMatches = [...filter.matchAll(/CurrentValue\.\[(\w+)\]\s*>=\s*(\d+(?:\.\d+)?)/g)];
+    for (const [, field, expected] of gteMatches) {
+      const actual = Number(row.fields[field!]);
+      if (!Number.isFinite(actual) || actual < Number(expected)) return false;
+    }
     const containsMatches = [...filter.matchAll(/CurrentValue\.\[(\w+)\]\.contains\("([^"]*)"\)/g)];
     for (const [, field, needle] of containsMatches) {
       if (!String(row.fields[field!] ?? '').includes(needle!)) return false;

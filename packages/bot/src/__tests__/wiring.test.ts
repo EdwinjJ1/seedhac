@@ -243,8 +243,8 @@ describe('handleEvent wiring', () => {
     } as unknown as SkillContext;
 
     await handleEvent(ctx, router, { qa: skill } as unknown as Record<SkillName, Skill>);
+    await vi.waitFor(() => expect(memoryStore.write).toHaveBeenCalledTimes(2));
 
-    expect(memoryStore.write).toHaveBeenCalledTimes(2);
     expect(memoryStore.write).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({ kind: 'skill_log', source_skill: 'qa', importance: 7 }),
@@ -272,14 +272,27 @@ describe('handleEvent wiring', () => {
       },
       runtime,
     );
+    const memoryStore = {
+      read: vi.fn(),
+      search: vi.fn(),
+      list: vi.fn(),
+      write: vi.fn().mockResolvedValue(ok({})),
+      delete: vi.fn(),
+      score: vi.fn(),
+    };
+    const scheduleCtx = { ...ctx, memoryStore } as unknown as SkillContext;
 
-    await handleEvent(ctx, router, { weekly: skill } as unknown as Record<SkillName, Skill>);
+    await handleEvent(scheduleCtx, router, { weekly: skill } as unknown as Record<
+      SkillName,
+      Skill
+    >);
 
     expect(skill.run).toHaveBeenCalledOnce();
     expect(runtime.sendCard).toHaveBeenCalledWith({
       chatId: 'oc_chat1',
       card: { templateName: 'weekly', content: { weekly: true } },
     });
+    expect(memoryStore.write).not.toHaveBeenCalled();
   });
 
   // 6. intent='silent'（非 qa/meetingNotes 等消息）→ 不触发任何 skill
@@ -415,7 +428,7 @@ describe('handleEvent wiring', () => {
     const userMessage = (messages as Array<{ role: string; content: string }>).find(
       (m) => m.role === 'user',
     );
-    expect(userMessage?.content).toContain('"skill":"qa|silent"');
+    expect(userMessage?.content).toContain('"skill":"<以下之一: qa | silent>"');
     expect(userMessage?.content).not.toContain('weekly');
     expect(userMessage?.content).not.toContain('requirementDoc');
   });
