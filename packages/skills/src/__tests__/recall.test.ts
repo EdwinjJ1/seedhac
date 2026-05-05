@@ -1,6 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { recallSkill } from '../recall.js';
-import type { SkillContext, BotEvent, Message, Result, RetrieveHit, SkillResult } from '@seedhac/contracts';
+import type {
+  SkillContext,
+  BotEvent,
+  Message,
+  Result,
+  RetrieveHit,
+  SkillResult,
+} from '@seedhac/contracts';
 
 // ── mock helpers ────────────────────────────────────────────────────────────
 
@@ -39,8 +46,15 @@ function makeCtx(event: BotEvent): SkillContext {
       start: vi.fn(),
       stop: vi.fn(),
     },
-    llm: { ask: mockLLMAsk, chat: vi.fn(), askStructured: vi.fn() },
-    bitable: { find: vi.fn(), insert: vi.fn(), batchInsert: vi.fn(), update: vi.fn(), delete: vi.fn(), link: vi.fn() },
+    llm: { ask: mockLLMAsk, chat: vi.fn(), askStructured: vi.fn(), chatWithTools: vi.fn() },
+    bitable: {
+      find: vi.fn(),
+      insert: vi.fn(),
+      batchInsert: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      link: vi.fn(),
+    },
     retrievers: {
       vector: { source: 'vector', retrieve: mockVectorRetrieve },
       bitable: { source: 'bitable', retrieve: mockBitableRetrieve },
@@ -50,7 +64,14 @@ function makeCtx(event: BotEvent): SkillContext {
 }
 
 function makeHit(id: string, snippet: string): RetrieveHit {
-  return { source: 'vector', id, title: snippet.slice(0, 30), snippet, score: 0.9, timestamp: Date.now() };
+  return {
+    source: 'vector',
+    id,
+    title: snippet.slice(0, 30),
+    snippet,
+    score: 0.9,
+    timestamp: Date.now(),
+  };
 }
 
 // ── tests ───────────────────────────────────────────────────────────────────
@@ -59,7 +80,10 @@ describe('recallSkill', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('match returns false for non-message events', async () => {
-    const ctx = makeCtx({ type: 'botJoinedChat', payload: { chatId: 'c', inviter: { userId: 'u' }, timestamp: 0 } });
+    const ctx = makeCtx({
+      type: 'botJoinedChat',
+      payload: { chatId: 'c', inviter: { userId: 'u' }, timestamp: 0 },
+    });
     expect(await recallSkill.match(ctx)).toBe(false);
     expect(mockFetchHistory).not.toHaveBeenCalled();
   });
@@ -70,12 +94,21 @@ describe('recallSkill', () => {
     expect(mockFetchHistory).not.toHaveBeenCalled();
   });
 
-  it('match returns false when keyword present but LLM detects no gap', async () => {
-    mockFetchHistory.mockResolvedValueOnce({ ok: true, value: { messages: [makeMessage('我记得好像不对')], hasMore: false } });
-    mockLLMAsk.mockResolvedValueOnce({ ok: true, value: '{"shouldRecall":false,"reason":"","query":""}' });
+  it('match returns false when keyword present but current chat already answered it', async () => {
+    mockFetchHistory.mockResolvedValueOnce({
+      ok: true,
+      value: {
+        messages: [
+          makeMessage('上次那个客户叫啥'),
+          makeMessage('叫张总，开过两次会', 'msg_answer'),
+        ],
+        hasMore: false,
+      },
+    });
 
-    const ctx = makeCtx(makeEvent('我记得好像不对'));
+    const ctx = makeCtx(makeEvent('上次那个客户叫啥'));
     expect(await recallSkill.match(ctx)).toBe(false);
+    expect(mockLLMAsk).not.toHaveBeenCalled();
   });
 
   it('normal path: match detects gap → run retrieves + synthesizes text', async () => {
@@ -87,17 +120,15 @@ describe('recallSkill', () => {
       ok: true,
       value: { messages: [makeMessage('那个预算是多少来着', messageId)], hasMore: false },
     });
-    mockLLMAsk.mockResolvedValueOnce({
-      ok: true,
-      value: '{"shouldRecall":true,"reason":"有人询问预算","query":"项目预算"}',
-    });
-
     const matched = await recallSkill.match(ctx);
     expect(matched).toBe(true);
 
     // run() calls — cache hit, no second LLM detection
     mockVectorRetrieve.mockResolvedValueOnce({ ok: true, value: [makeHit('h1', '预算是 10 万')] });
-    mockBitableRetrieve.mockResolvedValueOnce({ ok: true, value: [makeHit('h2', '已核定 10 万预算')] });
+    mockBitableRetrieve.mockResolvedValueOnce({
+      ok: true,
+      value: [makeHit('h2', '已核定 10 万预算')],
+    });
     mockLLMAsk.mockResolvedValueOnce({ ok: true, value: '项目预算是 10 万，上次会议已确认。' });
 
     const result: Result<SkillResult> = await recallSkill.run(ctx);
@@ -105,10 +136,9 @@ describe('recallSkill', () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.text).toBe('项目预算是 10 万，上次会议已确认。');
-      expect(result.value.reasoning).toBe('有人询问预算');
+      expect(result.value.reasoning).toBe('规则命中：模糊指代');
     }
-    // LLM was called once for detection (in match) + once for synthesis (in run)
-    expect(mockLLMAsk).toHaveBeenCalledTimes(2);
+    expect(mockLLMAsk).toHaveBeenCalledTimes(1);
   });
 
   it('run returns empty text when both retrievers return no hits', async () => {
@@ -116,10 +146,6 @@ describe('recallSkill', () => {
     const ctx = makeCtx(makeEvent('上次那个结论是啥', messageId));
 
     mockFetchHistory.mockResolvedValueOnce({ ok: true, value: { messages: [], hasMore: false } });
-    mockLLMAsk.mockResolvedValueOnce({
-      ok: true,
-      value: '{"shouldRecall":true,"reason":"未解答","query":"会议结论"}',
-    });
     await recallSkill.match(ctx);
 
     mockVectorRetrieve.mockResolvedValueOnce({ ok: true, value: [] });
@@ -129,7 +155,7 @@ describe('recallSkill', () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.value.text).toBe('');
-    expect(mockLLMAsk).toHaveBeenCalledTimes(1); // only detection, no synthesis
+    expect(mockLLMAsk).not.toHaveBeenCalled();
   });
 
   it('run degrades gracefully when LLM synthesis fails — returns first snippet', async () => {
@@ -137,15 +163,14 @@ describe('recallSkill', () => {
     const ctx = makeCtx(makeEvent('之前说的方案是啥', messageId));
 
     mockFetchHistory.mockResolvedValueOnce({ ok: true, value: { messages: [], hasMore: false } });
-    mockLLMAsk.mockResolvedValueOnce({
-      ok: true,
-      value: '{"shouldRecall":true,"reason":"方案缺失","query":"项目方案"}',
-    });
     await recallSkill.match(ctx);
 
     mockVectorRetrieve.mockResolvedValueOnce({ ok: true, value: [makeHit('h1', '采用方案A')] });
     mockBitableRetrieve.mockResolvedValueOnce({ ok: true, value: [] });
-    mockLLMAsk.mockResolvedValueOnce({ ok: false, error: { code: 'LLM_TIMEOUT', message: 'timeout' } });
+    mockLLMAsk.mockResolvedValueOnce({
+      ok: false,
+      error: { code: 'LLM_TIMEOUT', message: 'timeout' },
+    });
 
     const result = await recallSkill.run(ctx);
 
@@ -158,14 +183,17 @@ describe('recallSkill', () => {
     const ctx = makeCtx(makeEvent('上回那个截止日期', messageId));
 
     mockFetchHistory.mockResolvedValueOnce({ ok: true, value: { messages: [], hasMore: false } });
-    mockLLMAsk.mockResolvedValueOnce({
-      ok: true,
-      value: '{"shouldRecall":true,"reason":"截止日期未确认","query":"截止日期"}',
-    });
     await recallSkill.match(ctx);
 
     const vectorHit = makeHit('v1', 'DDL 是 5 月 1 日');
-    const bitableHit: RetrieveHit = { source: 'bitable', id: 'b1', title: '截止', snippet: '确认 DDL：2026-05-01', score: 1, timestamp: Date.now() };
+    const bitableHit: RetrieveHit = {
+      source: 'bitable',
+      id: 'b1',
+      title: '截止',
+      snippet: '确认 DDL：2026-05-01',
+      score: 1,
+      timestamp: Date.now(),
+    };
     mockVectorRetrieve.mockResolvedValueOnce({ ok: true, value: [vectorHit] });
     mockBitableRetrieve.mockResolvedValueOnce({ ok: true, value: [bitableHit] });
     mockLLMAsk.mockResolvedValueOnce({ ok: true, value: '截止日期是 5 月 1 日，已在表格中确认。' });
@@ -175,7 +203,9 @@ describe('recallSkill', () => {
     expect(result.ok).toBe(true);
     // verify both retrievers were called with the right query
     expect(mockVectorRetrieve).toHaveBeenCalledWith(expect.objectContaining({ query: '截止日期' }));
-    expect(mockBitableRetrieve).toHaveBeenCalledWith(expect.objectContaining({ query: '截止日期' }));
+    expect(mockBitableRetrieve).toHaveBeenCalledWith(
+      expect.objectContaining({ query: '截止日期' }),
+    );
     if (result.ok) expect(result.value.text).toContain('5 月');
   });
 
@@ -189,10 +219,6 @@ describe('recallSkill', () => {
       ok: true,
       value: { messages: [makeMessage('上次那个方案是什么', messageId)], hasMore: false },
     });
-    mockLLMAsk.mockResolvedValueOnce({
-      ok: true,
-      value: '{"shouldRecall":true,"reason":"方案未追溯","query":"项目方案"}',
-    });
     mockVectorRetrieve.mockResolvedValueOnce({ ok: true, value: [makeHit('h1', '采用方案A')] });
     mockBitableRetrieve.mockResolvedValueOnce({ ok: true, value: [] });
     mockLLMAsk.mockResolvedValueOnce({ ok: true, value: '上次确定的是方案A。' });
@@ -201,7 +227,7 @@ describe('recallSkill', () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.value.text).toBe('上次确定的是方案A。');
-    expect(mockLLMAsk).toHaveBeenCalledTimes(2); // detection + synthesis
+    expect(mockLLMAsk).toHaveBeenCalledTimes(1);
   });
 
   it('run handles total retriever failure and returns empty text', async () => {
@@ -209,19 +235,21 @@ describe('recallSkill', () => {
     const ctx = makeCtx(makeEvent('我记得之前讨论过这个', messageId));
 
     mockFetchHistory.mockResolvedValueOnce({ ok: true, value: { messages: [], hasMore: false } });
-    mockLLMAsk.mockResolvedValueOnce({
-      ok: true,
-      value: '{"shouldRecall":true,"reason":"历史讨论未追溯","query":"历史讨论"}',
-    });
     await recallSkill.match(ctx);
 
-    mockVectorRetrieve.mockResolvedValueOnce({ ok: false, error: { code: 'UNKNOWN', message: 'chroma down' } });
-    mockBitableRetrieve.mockResolvedValueOnce({ ok: false, error: { code: 'FEISHU_API_ERROR', message: 'timeout' } });
+    mockVectorRetrieve.mockResolvedValueOnce({
+      ok: false,
+      error: { code: 'UNKNOWN', message: 'chroma down' },
+    });
+    mockBitableRetrieve.mockResolvedValueOnce({
+      ok: false,
+      error: { code: 'FEISHU_API_ERROR', message: 'timeout' },
+    });
 
     const result = await recallSkill.run(ctx);
 
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.value.text).toBe('');
-    expect(mockLLMAsk).toHaveBeenCalledTimes(1); // no synthesis when hits empty
+    expect(mockLLMAsk).not.toHaveBeenCalled();
   });
 });

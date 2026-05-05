@@ -103,6 +103,25 @@ export class LarkDocxClient implements DocxClient {
     }
   }
 
+  async grantMembersEdit(token: string, type: 'docx' | 'slides', userIds: readonly string[]): Promise<Result<void>> {
+    for (const memberId of userIds) {
+      try {
+        const res = await (this.client.drive.v1.permissionMember as any).create({
+          path: { token },
+          params: { type, need_notification: false },
+          data: { member_type: 'openid', member_id: memberId, perm: 'edit' },
+        });
+        if (res.code !== 0) {
+          return err(makeError(ErrorCode.FEISHU_API_ERROR, `grantMembersEdit failed for ${memberId}: ${res.msg}`));
+        }
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return err(makeError(ErrorCode.FEISHU_API_ERROR, `grantMembersEdit error: ${msg}`, e));
+      }
+    }
+    return ok(undefined);
+  }
+
   private async readDocxRawContent(token: string): Promise<Result<string>> {
     try {
       const res = await (

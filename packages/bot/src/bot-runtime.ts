@@ -10,6 +10,8 @@ import {
   type PatchCardParams,
   type FetchHistoryParams,
   type FetchHistoryResult,
+  type FetchMembersParams,
+  type FetchMembersResult,
   type Message,
   type Mention,
   type UserRef,
@@ -425,6 +427,39 @@ export class LarkBotRuntime implements BotRuntime {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       return err(makeError(ErrorCode.FEISHU_API_ERROR, `fetchHistory error: ${msg}`, e));
+    }
+  }
+
+  async fetchMembers(params: FetchMembersParams): Promise<Result<FetchMembersResult>> {
+    await this.limiter.acquire();
+    try {
+      const res = await this.client.im.v1.chatMembers.get({
+        path: { chat_id: params.chatId },
+        params: { member_id_type: 'open_id', page_size: 100 },
+      });
+
+      if (res.code !== 0) {
+        return err(makeError(ErrorCode.FEISHU_API_ERROR, `fetchMembers failed: ${res.msg}`));
+      }
+
+      // 当前实现不分页：>100 人的群只返回前 100 个，下游授权/分工会静默截断。
+      // 这里至少把信号暴露出来，调用方按需决定是否提示用户。后续 follow-up：分页循环。
+      const items = res.data?.items ?? [];
+      if (res.data?.has_more) {
+        console.warn(
+          `[bot-runtime] fetchMembers: chat ${params.chatId} has more than 100 members, only the first ${items.length} are returned`,
+        );
+      }
+
+      return ok({
+        members: items.map((item) => ({
+          userId: item.member_id ?? '',
+          name: item.name ?? item.member_id ?? '未知成员',
+        })),
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return err(makeError(ErrorCode.FEISHU_API_ERROR, `fetchMembers error: ${msg}`, e));
     }
   }
 }

@@ -14,7 +14,8 @@
  */
 
 import { createBotRuntime } from '../bot-runtime.js';
-import type { Message, Card } from '@seedhac/contracts';
+import { larkCardBuilder } from '../card-builder.js';
+import type { Message } from '@seedhac/contracts';
 
 const runtime = createBotRuntime();
 
@@ -91,23 +92,29 @@ if (!historyResult.ok) {
   console.log('hasMore:', historyResult.value.hasMore);
 }
 
-// ─── 场景 5：sendCard ─────────────────────────────────────────────────────────
+// ─── 场景 5：fetchMembers ─────────────────────────────────────────────────────
 
-section('场景 5 · sendCard — 发送卡片消息');
+section('场景 5 · fetchMembers — 拉取群成员列表');
 
-const card = {
-  config: { wide_screen_mode: true },
-  header: {
-    title: { tag: 'plain_text', content: 'smoke test · BotRuntime' },
-    template: 'green',
-  },
-  elements: [
-    {
-      tag: 'div',
-      text: { tag: 'lark_md', content: '**BotRuntime.sendCard()** 验证通过 ✅\n\n所有场景均已完成。' },
-    },
-  ],
-} as unknown as Card;
+const membersResult = await runtime.fetchMembers({ chatId: firstMessage.chatId });
+
+if (!membersResult.ok) {
+  console.error('❌ fetchMembers 失败:', membersResult.error);
+  console.error('   可能缺少权限: im:chat:readonly 或 im:chat.member:read');
+} else {
+  console.log('✅ 成功，共', membersResult.value.members.length, '位成员:');
+  for (const m of membersResult.value.members) {
+    console.log(`  userId=${m.userId}  name=${m.name}`);
+  }
+}
+
+// ─── 场景 6：sendCard ─────────────────────────────────────────────────────────
+
+section('场景 6 · sendCard — 发送卡片消息');
+
+const card = larkCardBuilder.build('activation', {
+  chatName: 'smoke test · BotRuntime.sendCard() 验证通过 ✅',
+});
 
 const cardResult = await runtime.sendCard({
   chatId: firstMessage.chatId,

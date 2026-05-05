@@ -6,6 +6,7 @@ import {
   makeError,
   ok,
   type Result,
+  type SlideCard,
   type SlidesClient,
   type SlidesOutline,
   type SlidesRef,
@@ -15,7 +16,7 @@ type ExecFileResult = { stdout: string; stderr: string };
 type ExecFile = (
   file: string,
   args: readonly string[],
-  options?: { maxBuffer?: number },
+  options?: { cwd?: string; maxBuffer?: number },
 ) => Promise<ExecFileResult>;
 
 const execFile = promisify(execFileCallback) as ExecFile;
@@ -35,7 +36,10 @@ export class LarkSlidesClient implements SlidesClient {
 
   constructor(options: LarkSlidesClientOptions = {}) {
     this.bin = options.bin ?? 'lark-cli';
-    this.as = options.as ?? 'user';
+    // 默认用 bot 身份：bot 创建 = bot owns，可直接给团队成员授权，
+    // 无需任何人登录 lark-cli 也无需补 user OAuth scope。lark-cli 在
+    // bot 模式下还会自动把当前 cli 登录用户加为 full_access。
+    this.as = options.as ?? 'bot';
     this.baseUrl = options.baseUrl ?? 'https://feishu.cn';
     this.execFile = options.execFile ?? execFile;
   }
@@ -43,7 +47,9 @@ export class LarkSlidesClient implements SlidesClient {
   async createFromOutline(title: string, outline: SlidesOutline): Promise<Result<SlidesRef>> {
     const slides = outline.slides.map((slide, index) => renderSlideXml(slide, index));
     if (!slides.length) {
-      return err(makeError(ErrorCode.INVALID_INPUT, 'slides outline must contain at least one page'));
+      return err(
+        makeError(ErrorCode.INVALID_INPUT, 'slides outline must contain at least one page'),
+      );
     }
 
     try {
@@ -77,35 +83,251 @@ export class LarkSlidesClient implements SlidesClient {
       return ok(ref);
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e);
-      return err(makeError(ErrorCode.FEISHU_API_ERROR, `lark-cli slides +create failed: ${message}`));
+      return err(
+        makeError(ErrorCode.FEISHU_API_ERROR, `lark-cli slides +create failed: ${message}`),
+      );
     }
+  }
+
+  async grantMembersEdit(slidesToken: string, userIds: readonly string[]): Promise<Result<void>> {
+    if (userIds.length === 0) return ok(undefined);
+
+    for (const userId of userIds) {
+      try {
+        const { stdout, stderr } = await this.execFile(
+          this.bin,
+          [
+            'drive',
+            'permission.members',
+            'create',
+            '--as',
+            this.as,
+            '--params',
+            JSON.stringify({
+              token: slidesToken,
+              type: 'slides',
+              need_notification: false,
+            }),
+            '--data',
+            JSON.stringify({
+              member_type: 'openid',
+              member_id: userId,
+              perm: 'edit',
+            }),
+            '--yes',
+          ],
+          { maxBuffer: 1024 * 1024 },
+        );
+
+        const parsed = parseJsonOutput(stdout);
+        if (parsed && typeof parsed === 'object') {
+          const record = parsed as Record<string, unknown>;
+          if (record['ok'] === false || (typeof record['code'] === 'number' && record['code'] !== 0)) {
+            return err(
+              makeError(
+                ErrorCode.FEISHU_API_ERROR,
+                `lark-cli drive permission.members create failed for ${userId}`,
+                undefined,
+                { stdout, stderr },
+              ),
+            );
+          }
+        }
+      } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : String(e);
+        return err(
+          makeError(
+            ErrorCode.FEISHU_API_ERROR,
+            `grant slides member permission failed for ${userId}: ${message}`,
+          ),
+        );
+      }
+    }
+
+    return ok(undefined);
   }
 }
 
-function renderSlideXml(slide: SlidesOutline['slides'][number], index: number): string {
-  const bgColor = index % 2 === 0 ? 'rgb(246,248,250)' : 'rgb(255,250,240)';
-  const accentColor = index % 2 === 0 ? 'rgb(37,99,235)' : 'rgb(217,119,6)';
-  const bullets = slide.bullets
-    .slice(0, 5)
-    .map((bullet) => `<li><p>${escapeXml(bullet)}</p></li>`)
-    .join('');
-  const notes = slide.notes
-    ? `<shape type="text" topLeftX="80" topLeftY="465" width="820" height="44"><content textType="caption"><p>${escapeXml(slide.notes)}</p></content></shape>`
-    : '';
+const THEME = {
+  ink: 'rgb(17,24,39)',
+  slate: 'rgb(71,85,105)',
+  muted: 'rgb(100,116,139)',
+  line: 'rgb(215,222,232)',
+  paper: 'rgb(251,252,255)',
+  blue: 'rgb(36,91,255)',
+  green: 'rgb(22,163,74)',
+  amber: 'rgb(217,119,6)',
+  red: 'rgb(220,38,38)',
+  softBlue: 'rgb(238,244,255)',
+  softGreen: 'rgb(236,253,245)',
+  softAmber: 'rgb(255,247,237)',
+  softRed: 'rgb(255,241,242)',
+  white: 'rgb(255,255,255)',
+} as const;
 
+function renderSlideXml(slide: SlidesOutline['slides'][number], index: number): string {
   return [
     '<slide xmlns="http://www.larkoffice.com/sml/2.0">',
-    '<style>',
-    `<fill><fillColor color="${bgColor}"/></fill>`,
-    '</style>',
+    `<style><fill><fillColor color="${THEME.paper}"/></fill></style>`,
     '<data>',
-    `<shape type="rect" topLeftX="0" topLeftY="0" width="18" height="540"><style><fill><fillColor color="${accentColor}"/></fill></style></shape>`,
-    `<shape type="text" topLeftX="80" topLeftY="52" width="820" height="86"><content textType="title"><p>${escapeXml(slide.heading)}</p></content></shape>`,
-    `<shape type="text" topLeftX="86" topLeftY="170" width="800" height="260"><content textType="body"><ul>${bullets}</ul></content></shape>`,
-    notes,
+    ...renderNativeShapes(slide, index),
     '</data>',
     '</slide>',
   ].join('');
+}
+
+function renderNativeShapes(slide: SlidesOutline['slides'][number], index: number): string[] {
+  const accent = accentForSlide(slide.type);
+  const shapes = [
+    rect(0, 0, 960, 540, THEME.paper),
+    rect(0, 0, 18, 540, accent),
+    rect(72, 52, 96, 8, accent),
+    text(slide.title, 72, 78, 760, 76, 'title'),
+    text(`第 ${index + 1} 页`, 836, 56, 72, 30, 'caption'),
+  ];
+
+  if (slide.type === 'cover') {
+    return [
+      ...shapes,
+      text(slide.subtitle ?? slide.bullets?.[0] ?? '项目阶段性进展汇报', 76, 190, 720, 58, 'body'),
+      rect(72, 308, 760, 2, THEME.line),
+      text('Agent-Pilot Office Copilot', 76, 350, 520, 38, 'caption'),
+    ];
+  }
+
+  if (slide.type === 'timeline') {
+    const milestones = (
+      slide.milestones?.length
+        ? slide.milestones
+        : normalizeCards(slide).map((card) => ({
+            label: card.title,
+            ...(card.value && { date: card.value }),
+            ...(card.detail && { status: card.detail }),
+          }))
+    ).slice(0, 5);
+    return [
+      ...shapes,
+      ...milestones.flatMap((item, i) => [
+        rect(92, 156 + i * 70, 18, 18, accent),
+        text(item.date ?? `阶段 ${i + 1}`, 132, 150 + i * 70, 120, 34, 'caption'),
+        text(item.label, 268, 148 + i * 70, 360, 38, 'body'),
+        text(item.status ?? '', 650, 150 + i * 70, 190, 34, 'caption'),
+      ]),
+    ];
+  }
+
+  if (slide.type === 'risks') {
+    const risks = (
+      slide.risks?.length
+        ? slide.risks
+        : normalizeCards(slide).map((card) => ({
+            risk: card.title,
+            impact: card.value ?? '影响待评估',
+            mitigation: card.detail ?? '持续跟进',
+          }))
+    ).slice(0, 3);
+    return [
+      ...shapes,
+      rect(72, 142, 800, 42, THEME.softRed),
+      text('风险', 96, 151, 160, 26, 'caption'),
+      text('影响', 360, 151, 160, 26, 'caption'),
+      text('应对', 620, 151, 160, 26, 'caption'),
+      ...risks.flatMap((item, i) => [
+        rect(72, 210 + i * 88, 800, 58, i % 2 === 0 ? THEME.white : THEME.softRed),
+        rect(72, 210 + i * 88, 8, 58, accent),
+        text(item.risk, 96, 222 + i * 88, 230, 34, 'body'),
+        text(item.impact, 360, 222 + i * 88, 220, 34, 'body'),
+        text(item.mitigation, 620, 222 + i * 88, 230, 34, 'body'),
+      ]),
+    ];
+  }
+
+  if (slide.type === 'nextSteps') {
+    const tasks = (
+      slide.tasks?.length
+        ? slide.tasks
+        : normalizeCards(slide).map((card) => ({
+            owner: card.value ?? slide.presenterName ?? '待定',
+            task: card.title,
+            ...(card.detail && { due: card.detail }),
+          }))
+    ).slice(0, 5);
+    return [
+      ...shapes,
+      rect(72, 142, 800, 42, THEME.softAmber),
+      text('负责人', 96, 151, 160, 26, 'caption'),
+      text('行动项', 260, 151, 440, 26, 'caption'),
+      text('截止', 735, 151, 120, 26, 'caption'),
+      ...tasks.flatMap((item, i) => [
+        rect(72, 204 + i * 62, 800, 44, i % 2 === 0 ? THEME.white : THEME.softAmber),
+        rect(72, 204 + i * 62, 8, 44, accent),
+        text(item.owner, 96, 214 + i * 62, 132, 28, 'caption'),
+        text(item.task, 260, 212 + i * 62, 420, 30, 'body'),
+        text(item.due ?? '待定', 735, 214 + i * 62, 120, 28, 'caption'),
+      ]),
+    ];
+  }
+
+  const cards = normalizeCards(slide).slice(0, 5);
+  const bullets = slide.type === 'closing' && slide.bullets?.length ? slide.bullets : undefined;
+  return [
+    ...shapes,
+    ...(bullets
+      ? bullets.slice(0, 4).flatMap((item, i) => bullet(item, 86, 176 + i * 62, accent))
+      : cards.flatMap((card, i) => cardShape(card, 76 + (i % 2) * 402, 154 + Math.floor(i / 2) * 118, accent))),
+    ...(slide.presenterName ? [text(`汇报人：${slide.presenterName}`, 72, 480, 300, 28, 'caption')] : []),
+  ];
+}
+
+function accentForSlide(type: SlidesOutline['slides'][number]['type']): string {
+  switch (type) {
+    case 'timeline':
+      return THEME.green;
+    case 'risks':
+      return THEME.red;
+    case 'nextSteps':
+      return THEME.amber;
+    default:
+      return THEME.blue;
+  }
+}
+
+function cardShape(card: SlideCard, x: number, y: number, accent: string): string[] {
+  return [
+    rect(x, y, 360, 82, THEME.white),
+    rect(x, y, 8, 82, accent),
+    text(card.value ?? '', x + 28, y + 14, 90, 26, 'caption'),
+    text(card.title, x + 126, y + 12, 190, 30, 'body'),
+    text(card.detail ?? '', x + 126, y + 48, 200, 24, 'caption'),
+  ];
+}
+
+function bullet(value: string, x: number, y: number, accent: string): string[] {
+  return [rect(x, y + 8, 10, 10, accent), text(value, x + 28, y, 700, 34, 'body')];
+}
+
+function rect(x: number, y: number, width: number, height: number, fill: string): string {
+  return `<shape type="rect" topLeftX="${x}" topLeftY="${y}" width="${width}" height="${height}"><style><fill><fillColor color="${fill}"/></fill></style></shape>`;
+}
+
+function text(
+  value: string,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  textType: 'title' | 'body' | 'caption',
+): string {
+  if (!value.trim()) return '';
+  return `<shape type="text" topLeftX="${x}" topLeftY="${y}" width="${width}" height="${height}"><content textType="${textType}"><p>${escapeXml(value)}</p></content></shape>`;
+}
+
+function normalizeCards(slide: SlidesOutline['slides'][number]): SlideCard[] {
+  if (slide.cards?.length) return [...slide.cards];
+  const bullets = slide.bullets?.length ? slide.bullets : [];
+  return bullets.length
+    ? bullets.map((bulletText, index) => ({ title: bulletText, value: `0${index + 1}` }))
+    : [{ title: slide.subtitle ?? slide.title, value: '01' }];
 }
 
 function escapeXml(value: string): string {
@@ -119,7 +341,9 @@ function escapeXml(value: string): string {
 
 function parseSlidesRef(output: string, baseUrl: string): SlidesRef | undefined {
   const parsed = parseJsonOutput(output);
-  const url = parsed ? findString(parsed, (value) => /https?:\/\/\S+\/slides\//.test(value)) : undefined;
+  const url = parsed
+    ? findString(parsed, (value) => /https?:\/\/\S+\/slides\//.test(value))
+    : undefined;
   const xmlPresentationId = parsed ? findStringByKey(parsed, 'xml_presentation_id') : undefined;
   const tokenFromJson = parsed
     ? findString(parsed, (value) => /^[A-Za-z0-9_-]{8,}$/.test(value) && !value.startsWith('http'))

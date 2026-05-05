@@ -269,6 +269,28 @@ function buildSummary(input: SummaryCardInput): Card {
  * UI：页数 + 每页标题 + bullet 预览，唯一主按钮
  */
 function buildSlides(input: SlidesCardInput): Card {
+  if (input.isLoading) {
+    return card('slides', {
+      schema: '2.0',
+      header: { title: pt('演示文稿生成中'), template: 'orange' },
+      body: {
+        elements: [
+          md(`**${input.title}**\n正在生成演示文稿和汇报分工文稿，请稍等片刻。`),
+        ],
+      },
+    });
+  }
+
+  if (input.errorMessage) {
+    return card('slides', {
+      schema: '2.0',
+      header: { title: pt('演示文稿生成失败'), template: 'red' },
+      body: {
+        elements: [md(`**${input.title}**\n${input.errorMessage}`)],
+      },
+    });
+  }
+
   const elements: BodyElement[] = [md(`**${input.title}**\n共 ${input.pageCount} 页`), hr()];
   if (input.preview?.length) {
     const previewMd = input.preview

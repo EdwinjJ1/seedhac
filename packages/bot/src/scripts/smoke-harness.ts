@@ -72,6 +72,7 @@ const runtime: BotRuntime = {
       ],
       hasMore: false,
     }),
+  fetchMembers: async () => ok({ members: [] }),
 };
 
 const llm: LLMClient = {
@@ -131,6 +132,7 @@ const ctx: SkillContext = {
     getShareLink: async () => ok('https://example.test/doc'),
     createFromMarkdown: async () => ok({ docToken: 'doc', url: 'https://example.test/doc' }),
     readContent: async () => ok(''),
+    grantMembersEdit: async () => ok(undefined),
   },
   cardBuilder: larkCardBuilder,
   retrievers: {},

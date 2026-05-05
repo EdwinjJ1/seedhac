@@ -8,6 +8,7 @@ const mockMessageCreate = vi.fn();
 const mockMessageReply = vi.fn();
 const mockMessagePatch = vi.fn();
 const mockMessageList = vi.fn();
+const mockChatMembersGet = vi.fn();
 const mockWsStart = vi.fn();
 const mockWsClose = vi.fn();
 const mockRegister = vi.fn();
@@ -25,6 +26,11 @@ vi.mock('@larksuiteoapi/node-sdk', () => {
             reply: mockMessageReply,
             patch: mockMessagePatch,
             list: mockMessageList,
+          },
+          v1: {
+            chatMembers: {
+              get: mockChatMembersGet,
+            },
           },
         },
       };
@@ -160,6 +166,35 @@ describe('LarkBotRuntime', () => {
       expect(result.value.messages[0]!.text).toBe('历史消息');
       expect(result.value.hasMore).toBe(false);
     }
+  });
+
+  it('fetchMembers returns mapped chat members', async () => {
+    mockChatMembersGet.mockResolvedValue({
+      code: 0,
+      data: {
+        items: [
+          { member_id: 'ou_1', name: '张三' },
+          { member_id: 'ou_2', name: '李四' },
+        ],
+      },
+    });
+
+    const runtime = makeRuntime();
+    const result = await runtime.fetchMembers({ chatId: 'oc_chat1' });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.members).toEqual([
+        { userId: 'ou_1', name: '张三' },
+        { userId: 'ou_2', name: '李四' },
+      ]);
+    }
+    expect(mockChatMembersGet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: { chat_id: 'oc_chat1' },
+        params: expect.objectContaining({ member_id_type: 'open_id' }),
+      }),
+    );
   });
 
   // 5. SDK 报错 → sendText 返回 err，不抛异常
