@@ -5,8 +5,15 @@
  * 数据流：群历史消息 → LLM 结构化提取 → 创建飞书文档 → 推 docPush 卡片 → 存入 memory
  */
 
-import type { Skill } from '@seedhac/contracts';
-import { ErrorCode, err, makeError } from '@seedhac/contracts';
+import type { Message, Skill } from '@seedhac/contracts';
+import { err, ok } from '@seedhac/contracts';
+import {
+  REQ_PROMPT,
+  RequirementDocSchema,
+  renderRequirementDocMarkdown,
+} from './prompts/requirement-doc.js';
+
+const TRIGGER_RE = /项目需求|需求文档|PRD|产品需求|以下是.*需求|这是.*项目|项目背景|项目目标/i;
 
 export const requirementDocSkill: Skill = {
   name: 'requirementDoc',
@@ -18,10 +25,72 @@ export const requirementDocSkill: Skill = {
   },
   match: (ctx) => {
     if (ctx.event.type !== 'message') return false;
-    return /项目需求|需求文档|PRD|产品需求|以下是.*需求|这是.*项目|项目背景|项目目标/i.test(
-      ctx.event.payload.text,
-    );
+    return TRIGGER_RE.test(ctx.event.payload.text);
   },
-  run: async () =>
-    err(makeError(ErrorCode.SKILL_NOT_IMPLEMENTED, 'requirementDoc skill not implemented — see issue #34')),
+  run: async (ctx) => {
+    if (ctx.event.type !== 'message') {
+      return ok({ text: '' });
+    }
+    const msg = ctx.event.payload as Message;
+    const chatId = msg.chatId;
+
+    // a. 拉取最近上下文
+    ctx.logger.info('requirementDoc: fetching chat history', { chatId });
+    const historyResult = await ctx.runtime.fetchHistory({ chatId, pageSize: 20 });
+    if (!historyResult.ok) return err(historyResult.error);
+    const history = historyResult.value.messages;
+
+    // b. LLM 结构化提取
+    ctx.logger.info('requirementDoc: asking LLM for structured extraction', {
+      historyCount: history.length,
+    });
+    const docResult = await ctx.llm.askStructured(
+      REQ_PROMPT(history),
+      RequirementDocSchema,
+      { model: 'pro' },
+    );
+    if (!docResult.ok) return err(docResult.error);
+    const doc = docResult.value;
+
+    // c. 序列化 markdown + 创建飞书文档
+    const markdown = renderRequirementDocMarkdown(doc);
+    ctx.logger.info('requirementDoc: creating feishu doc', {
+      title: doc.title,
+      goalCount: doc.goals.length,
+      deliverableCount: doc.deliverables.length,
+    });
+    const fileResult = await ctx.docx.createFromMarkdown(doc.title, markdown);
+    if (!fileResult.ok) return err(fileResult.error);
+
+    // d. 写 memory（失败仅 warn，不阻断卡片输出）
+    const memRes = await ctx.bitable.insert({
+      table: 'memory',
+      row: {
+        chatId,
+        type: 'requirement',
+        docToken: fileResult.value.docToken,
+        content: doc.title,
+        timestamp: Date.now(),
+      },
+    });
+    if (!memRes.ok) {
+      ctx.logger.warn('requirementDoc: insert memory failed', {
+        code: memRes.error.code,
+        message: memRes.error.message,
+      });
+    }
+
+    // e. 推 docPush 卡片
+    const card = ctx.cardBuilder.build('docPush', {
+      docTitle: doc.title,
+      docUrl: fileResult.value.url,
+      docType: 'requirement',
+      summary: `已整理 ${doc.goals.length} 个目标、${doc.deliverables.length} 个交付物`,
+    });
+
+    return ok({
+      card,
+      reasoning: `检测到需求描述，基于 ${history.length} 条群聊记录生成需求文档「${doc.title}」`,
+    });
+  },
 };
