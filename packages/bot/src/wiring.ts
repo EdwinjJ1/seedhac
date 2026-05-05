@@ -120,6 +120,7 @@ async function handleWithHarness(
   const systemPrompt = harness.promptCache.build({ chatId, mention: true });
   const executor = makeExecutor({
     store: harness.memoryStore,
+    skills: registeredSkillValues(skills),
     chatId,
     logger,
     docsRoot: harness.docsRoot,
@@ -214,6 +215,12 @@ function registeredSkillNames(
   skills: Readonly<Partial<Record<SkillName, Skill>>>,
 ): readonly SkillName[] {
   return Object.keys(skills).filter((name): name is SkillName => isSkillName(name, skills));
+}
+
+function registeredSkillValues(
+  skills: Readonly<Partial<Record<SkillName, Skill>>>,
+): readonly Skill[] {
+  return registeredSkillNames(skills).map((name) => skills[name]!);
 }
 
 function isSkillName(
