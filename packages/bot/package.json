@@ -15,8 +15,12 @@
     "dev:smoke-docx": "node --env-file=../../.env --import tsx/esm src/scripts/smoke-docx.ts",                            
     "dev:smoke-bot-runtime": "node --env-file=../../.env --import tsx/esm src/scripts/smoke-bot-runtime.ts",
     "dev:smoke-tool-call": "node --env-file=../../.env --import tsx/esm src/scripts/smoke-tool-call.ts",
+    "dev:e2e-memory": "node --env-file=../../.env --import tsx/esm src/scripts/smoke-memory-e2e.ts",
+    "dev:get-bot-open-id": "node --env-file=../../.env --import tsx/esm src/scripts/get-bot-open-id.ts",
+    "dev:setup-bitable": "node --env-file=../../.env --import tsx/esm src/scripts/setup-bitable.ts",
     "start": "node --env-file=../../.env dist/index.js",
-    "test": "vitest run --exclude '**/*.eval.test.ts'",
+    "test": "vitest run --exclude '**/*.eval.test.ts' --exclude '**/memory-e2e.test.ts'",
+    "test:e2e-memory": "node --env-file=../../.env --import tsx/esm ./node_modules/vitest/vitest.mjs run src/__tests__/memory-e2e.test.ts",
     "eval:gap-detector": "node --env-file=../../.env --import tsx/esm ./node_modules/vitest/vitest.mjs run src/__tests__/gap-detector.eval.test.ts"
   },
   "dependencies": {
