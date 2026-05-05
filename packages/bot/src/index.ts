@@ -8,7 +8,7 @@ import { LarkBitableClient } from './bitable-client.js';
 import { larkCardBuilder } from './card-builder.js';
 import { createDocxClient } from './docx-client.js';
 import { VolcanoLLMClient } from './llm-client.js';
-import { MemoryStore, NullMemoryStore } from './memory/memory-store.js';
+import { MemoryStore } from './memory/memory-store.js';
 import { SystemPromptCache } from './memory/system-prompt.js';
 import { createSlidesClient } from './slides-client.js';
 import { SkillRouter } from './skill-router.js';
@@ -26,8 +26,13 @@ const logger: Logger = {
 function buildDeps() {
   const appId = process.env['LARK_APP_ID'];
   const appSecret = process.env['LARK_APP_SECRET'];
+  const bitableAppToken = process.env['LARK_BITABLE_APP_TOKEN'] ?? process.env['BITABLE_APP_TOKEN'];
+  const memoryTableId =
+    process.env['LARK_BITABLE_MEMORY_TABLE_ID'] ?? process.env['BITABLE_TABLE_MEMORY'];
   if (!appId) throw new Error('Missing env var: LARK_APP_ID');
   if (!appSecret) throw new Error('Missing env var: LARK_APP_SECRET');
+  if (!bitableAppToken) throw new Error('Missing env var: LARK_BITABLE_APP_TOKEN');
+  if (!memoryTableId) throw new Error('Missing env var: LARK_BITABLE_MEMORY_TABLE_ID');
 
   const runtime = createBotRuntime();
   const router = new SkillRouter(process.env['LARK_BOT_OPEN_ID'] ?? '');
@@ -43,9 +48,9 @@ function buildDeps() {
   const bitable = new LarkBitableClient({
     appId,
     appSecret,
-    appToken: process.env['BITABLE_APP_TOKEN'] ?? '',
+    appToken: bitableAppToken,
     tableIds: {
-      memory: process.env['BITABLE_TABLE_MEMORY'] ?? '',
+      memory: memoryTableId,
       decision: process.env['BITABLE_TABLE_DECISION'] ?? '',
       todo: process.env['BITABLE_TABLE_TODO'] ?? '',
       knowledge: process.env['BITABLE_TABLE_KNOWLEDGE'] ?? '',
@@ -65,15 +70,12 @@ async function main(): Promise<void> {
 
   const docsRoot = process.env['BOT_DOCS_ROOT'] ?? DEFAULT_DOCS_ROOT;
   const promptCache = await SystemPromptCache.load(docsRoot, { strict: true });
-  // 缺 BITABLE_APP_TOKEN 时降级为 NullMemoryStore，避免冒烟阶段被存储层 token 失败阻塞
-  const memoryStore = process.env['BITABLE_APP_TOKEN']
-    ? new MemoryStore({ bitable, llm, logger })
-    : new NullMemoryStore();
-  logger.info('memory store initialized', {
-    type: process.env['BITABLE_APP_TOKEN']
-      ? 'MemoryStore'
-      : 'NullMemoryStore (no BITABLE_APP_TOKEN)',
-  });
+  const memoryTableCheck = await bitable.find({ table: 'memory', pageSize: 1 });
+  if (!memoryTableCheck.ok) {
+    throw new Error(`Memory table is not accessible: ${memoryTableCheck.error.message}`);
+  }
+  const memoryStore = new MemoryStore({ bitable, llm, logger });
+  logger.info('memory store initialized', { type: 'MemoryStore' });
   const botOpenId = process.env['LARK_BOT_OPEN_ID'] ?? '';
   if (!botOpenId) {
     logger.warn('LARK_BOT_OPEN_ID 未配置 — @bot 检测会失败，所有 mention skill 不会触发');
@@ -106,6 +108,7 @@ async function main(): Promise<void> {
       docx,
       slides,
       cardBuilder: larkCardBuilder,
+      memoryStore,
       retrievers: {},
       logger,
     };
