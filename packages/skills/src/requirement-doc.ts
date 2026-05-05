@@ -293,6 +293,34 @@ export const requirementDocSkill: Skill = {
       return err(fileResult.error);
     }
 
+    // d2. 给当前群成员授「可编辑」权限。
+    //     bot 用 SDK 创建 docx 时默认只有 bot 自己有权限，群成员点开按钮看到的是
+    //     无权限文档。补这一步对齐 slides skill 的行为。失败仅 warn 不阻断。
+    const membersRes = await ctx.runtime.fetchMembers({ chatId });
+    if (membersRes.ok && membersRes.value.members.length > 0) {
+      const memberIds = membersRes.value.members.map((m) => m.userId);
+      const grantRes = await ctx.docx.grantMembersEdit(
+        fileResult.value.docToken,
+        'docx',
+        memberIds,
+      );
+      if (!grantRes.ok) {
+        ctx.logger.warn('requirementDoc: grant members edit failed', {
+          code: grantRes.error.code,
+          message: grantRes.error.message,
+        });
+      } else {
+        ctx.logger.info('requirementDoc: granted members edit', {
+          memberCount: memberIds.length,
+        });
+      }
+    } else if (!membersRes.ok) {
+      ctx.logger.warn('requirementDoc: fetchMembers failed; skip granting edit', {
+        code: membersRes.error.code,
+        message: membersRes.error.message,
+      });
+    }
+
     // e. 写 memory（失败仅 warn，不阻断卡片输出）
     const memRes = await ctx.bitable.insert({
       table: 'memory',
