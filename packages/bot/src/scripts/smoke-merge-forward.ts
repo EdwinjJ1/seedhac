@@ -6,11 +6,12 @@
 import { createBotRuntime } from '../bot-runtime.js';
 
 // 接收任意 chatId：node ... smoke-merge-forward.ts <chat_id>
-const TARGET_CHAT = process.argv[2];
-if (!TARGET_CHAT) {
+const argChat = process.argv[2];
+if (!argChat) {
   console.error('Usage: smoke-merge-forward.ts <chat_id>');
   process.exit(1);
 }
+const TARGET_CHAT: string = argChat;
 
 async function main(): Promise<void> {
   const runtime = createBotRuntime();
