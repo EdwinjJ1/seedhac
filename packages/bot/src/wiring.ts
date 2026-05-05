@@ -37,6 +37,10 @@ export async function handleEvent(
     await handleCardAction(ctx, skills);
     return;
   }
+  if (event.type === 'schedule') {
+    await handleSchedule(ctx, skills);
+    return;
+  }
   if (event.type !== 'message') return;
 
   const msg = event.payload;
@@ -74,7 +78,6 @@ async function handleWithSkillRouter(
 
 async function runSkill(ctx: SkillContext, skill: Skill): Promise<void> {
   const { event, logger, runtime } = ctx;
-  if (event.type !== 'message') return;
   const result = await skill.run(ctx);
   if (!result.ok) {
     logger.error('skill failed', {
@@ -84,6 +87,8 @@ async function runSkill(ctx: SkillContext, skill: Skill): Promise<void> {
     });
     return;
   }
+  await writeSkillMemory(ctx, skill, result.value);
+  if (event.type !== 'message') return;
   const { card, text } = result.value;
   if (card) {
     const sendResult = await runtime.sendCard({ chatId: event.payload.chatId, card });
@@ -106,6 +111,121 @@ async function runSkill(ctx: SkillContext, skill: Skill): Promise<void> {
     }
   }
   logger.info(`skill=${skill.name} replied to chat=${event.payload.chatId}`);
+}
+
+async function writeSkillMemory(
+  ctx: SkillContext,
+  skill: Skill,
+  result: { readonly card?: unknown; readonly text?: string; readonly reasoning?: string },
+): Promise<void> {
+  const memoryStore = ctx.memoryStore;
+  if (!memoryStore) return;
+
+  const { chatId, userId, eventKey } = memoryEventIdentity(ctx);
+  const now = Date.now();
+  const summary = summarizeSkillResult(skill, result);
+
+  const skillLog = await memoryStore.write({
+    kind: 'skill_log',
+    chat_id: chatId,
+    key: safeMemoryKey(`skill:${skill.name}:${eventKey}:${now}`),
+    ...(userId ? { user_id: safeMemoryKey(userId) } : {}),
+    source_skill: skill.name,
+    importance: 7,
+    content: JSON.stringify({
+      skill: skill.name,
+      reason: result.reasoning ?? '',
+      output: summary,
+      at: now,
+    }),
+  });
+  if (!skillLog.ok) {
+    ctx.logger.warn('memory auto-write skill_log failed', {
+      skill: skill.name,
+      code: skillLog.error.code,
+      message: skillLog.error.message,
+    });
+  }
+
+  if (skill.name !== 'qa' && skill.name !== 'summary') return;
+  const chatWrite = await memoryStore.write({
+    kind: 'chat',
+    chat_id: chatId,
+    key: safeMemoryKey(`chat:${skill.name}:${eventKey}:${now}`),
+    ...(userId ? { user_id: safeMemoryKey(userId) } : {}),
+    source_skill: skill.name,
+    importance: skill.name === 'summary' ? 7 : 5,
+    content: JSON.stringify({
+      skill: skill.name,
+      input: ctx.event.type === 'message' ? ctx.event.payload.text : '',
+      output: summary,
+      reason: result.reasoning ?? '',
+      at: now,
+    }),
+  });
+  if (!chatWrite.ok) {
+    ctx.logger.warn('memory auto-write chat failed', {
+      skill: skill.name,
+      code: chatWrite.error.code,
+      message: chatWrite.error.message,
+    });
+  }
+}
+
+function memoryEventIdentity(ctx: SkillContext): {
+  chatId: string;
+  userId?: string;
+  eventKey: string;
+} {
+  const { event } = ctx;
+  if (event.type === 'message') {
+    return {
+      chatId: event.payload.chatId,
+      userId: event.payload.sender.userId,
+      eventKey: event.payload.messageId,
+    };
+  }
+  if (event.type === 'cardAction') {
+    return {
+      chatId: event.payload.chatId,
+      userId: event.payload.user.userId,
+      eventKey: event.payload.messageId,
+    };
+  }
+  if (event.type === 'botJoinedChat') {
+    return {
+      chatId: event.payload.chatId,
+      userId: event.payload.inviter.userId,
+      eventKey: `botJoined:${event.payload.timestamp}`,
+    };
+  }
+  if (event.type === 'schedule') {
+    return {
+      chatId: event.payload.chatId,
+      eventKey: `schedule:${event.payload.skillName}:${event.payload.timestamp}`,
+    };
+  }
+  return {
+    chatId: event.payload.chatId,
+    userId: event.payload.user.userId,
+    eventKey: `p2p:${event.payload.timestamp}`,
+  };
+}
+
+function summarizeSkillResult(
+  skill: Skill,
+  result: { readonly card?: unknown; readonly text?: string; readonly reasoning?: string },
+): string {
+  const text = result.text?.trim();
+  if (text) return text.slice(0, 500);
+  if (result.reasoning) return result.reasoning.slice(0, 500);
+  if (result.card) return `${skill.name} produced a card`;
+  return `${skill.name} completed`;
+}
+
+function safeMemoryKey(raw: string): string {
+  const key = raw.replace(/[^A-Za-z0-9_:.-]+/g, '_').slice(0, 120);
+  return key.length > 0 ? key : 'unknown';
 }
 
 async function handleWithHarness(
@@ -285,17 +405,22 @@ async function handleCardAction(
     ...ctx,
     event: { type: 'message', payload: question as Message },
   };
-  const result = await qa.run(replayCtx);
-  if (!result.ok) {
-    logger.error('qa.reanswer skill failed', {
-      code: result.error.code,
-      message: result.error.message,
-    });
+  await runSkill(replayCtx, qa);
+  logger.info(`skill=qa reanswer requested chat=${chatId}`);
+}
+
+async function handleSchedule(
+  ctx: SkillContext,
+  skills: Readonly<Partial<Record<SkillName, Skill>>>,
+): Promise<void> {
+  const { event } = ctx;
+  if (event.type !== 'schedule') return;
+  const skillName = event.payload.skillName as SkillName;
+  const skill = skills[skillName];
+  if (!skill) {
+    ctx.logger.warn('schedule selected missing skill', { skill: event.payload.skillName });
     return;
   }
-
-  const { card, text } = result.value;
-  if (card) await runtime.sendCard({ chatId, card });
-  if (text) await runtime.sendText({ chatId, text });
-  logger.info(`skill=qa reanswered chat=${chatId}`);
+  if (!(await skill.match(ctx))) return;
+  await runSkill(ctx, skill);
 }

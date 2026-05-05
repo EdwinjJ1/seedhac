@@ -218,6 +218,43 @@ describe('handleEvent wiring', () => {
     expect(ctx.logger.info).not.toHaveBeenCalledWith(expect.stringContaining('replied'));
   });
 
+  it('writes skill_log and qa chat memory after successful skill run', async () => {
+    const memoryStore = {
+      read: vi.fn(),
+      search: vi.fn(),
+      list: vi.fn(),
+      write: vi.fn().mockResolvedValue(ok({})),
+      delete: vi.fn(),
+      score: vi.fn(),
+    };
+    const runtime = makeRuntime();
+    const skill: Skill = {
+      ...qaSkill,
+      match: () => true,
+      run: vi.fn().mockResolvedValue(ok({ text: 'answer', reasoning: 'answered from context' })),
+    };
+    const msg = makeMessage({
+      text: '这是什么？',
+      mentions: [{ user: { userId: BOT_ID }, key: '@_bot' }],
+    });
+    const ctx: SkillContext = {
+      ...makeCtx(makeEvent(msg), runtime),
+      memoryStore,
+    } as unknown as SkillContext;
+
+    await handleEvent(ctx, router, { qa: skill } as unknown as Record<SkillName, Skill>);
+
+    expect(memoryStore.write).toHaveBeenCalledTimes(2);
+    expect(memoryStore.write).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ kind: 'skill_log', source_skill: 'qa', importance: 7 }),
+    );
+    expect(memoryStore.write).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ kind: 'chat', source_skill: 'qa', importance: 5 }),
+    );
+  });
+
   // 6. intent='silent'（非 qa/meetingNotes 等消息）→ 不触发任何 skill
   it('silent intent → no skill triggered', async () => {
     const mockSkill: Skill = {
