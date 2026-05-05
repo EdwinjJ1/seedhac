@@ -14,10 +14,7 @@ import { createSlidesClient } from './slides-client.js';
 import { SkillRouter } from './skill-router.js';
 import { handleEvent } from './wiring.js';
 
-const DEFAULT_DOCS_ROOT = resolve(
-  fileURLToPath(import.meta.url),
-  '../../../../docs/bot-memory',
-);
+const DEFAULT_DOCS_ROOT = resolve(fileURLToPath(import.meta.url), '../../../../docs/bot-memory');
 
 const logger: Logger = {
   debug: (msg, meta) => console.debug(`[bot] ${msg}`, meta ?? ''),
@@ -67,13 +64,15 @@ async function main(): Promise<void> {
   const { runtime, router, llm, bitable, docx, slides } = buildDeps();
 
   const docsRoot = process.env['BOT_DOCS_ROOT'] ?? DEFAULT_DOCS_ROOT;
-  const promptCache = await SystemPromptCache.load(docsRoot);
+  const promptCache = await SystemPromptCache.load(docsRoot, { strict: true });
   // 缺 BITABLE_APP_TOKEN 时降级为 NullMemoryStore，避免冒烟阶段被存储层 token 失败阻塞
   const memoryStore = process.env['BITABLE_APP_TOKEN']
     ? new MemoryStore({ bitable, llm, logger })
     : new NullMemoryStore();
   logger.info('memory store initialized', {
-    type: process.env['BITABLE_APP_TOKEN'] ? 'MemoryStore' : 'NullMemoryStore (no BITABLE_APP_TOKEN)',
+    type: process.env['BITABLE_APP_TOKEN']
+      ? 'MemoryStore'
+      : 'NullMemoryStore (no BITABLE_APP_TOKEN)',
   });
   const botOpenId = process.env['LARK_BOT_OPEN_ID'] ?? '';
   if (!botOpenId) {

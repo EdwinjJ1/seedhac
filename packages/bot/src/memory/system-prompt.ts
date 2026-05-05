@@ -27,27 +27,45 @@ const TOOL_LINES = [
 
 // ─── 缓存 ───────────────────────────────────────────────────────────────────────
 
+export interface SystemPromptLoadOptions {
+  readonly strict?: boolean;
+}
+
 export class SystemPromptCache {
   private constructor(
+    private readonly overviewText: string,
     private readonly overviewFirstLine: string,
     private readonly skillSummaries: readonly string[],
   ) {}
 
   /**
    * 启动时调用：读取 OVERVIEW.md 首行（项目定位句）和所有 skills/*.md 首行摘要。
-   * 文件缺失时静默降级，不抛错。
+   * 默认文件缺失时静默降级；strict=true 时缺文件启动失败。
    */
-  static async load(docsRoot: string): Promise<SystemPromptCache> {
-    const overviewFirstLine = await readFirstLine(resolve(docsRoot, 'OVERVIEW.md'));
+  static async load(
+    docsRoot: string,
+    opts: SystemPromptLoadOptions = {},
+  ): Promise<SystemPromptCache> {
+    const overviewPath = resolve(docsRoot, 'OVERVIEW.md');
+    const overviewText = await readDoc(overviewPath, opts.strict ?? false);
+    const overviewFirstLine = firstMeaningfulLine(overviewText);
 
     const skillSummaries = await Promise.all(
       skills.map(async (s) => {
-        const firstLine = await readFirstLine(resolve(docsRoot, 'skills', `${s.name}.md`));
-        return firstLine ? `${s.name}: ${firstLine}` : `${s.name}: ${s.trigger.description}`;
+        const content = await readDoc(
+          resolve(docsRoot, 'skills', `${s.name}.md`),
+          opts.strict ?? false,
+        );
+        const firstLine = firstMeaningfulLine(content);
+        return firstLine ? `${s.name}: ${firstLine}` : `${s.name}: ${s.metadata.description}`;
       }),
     );
 
-    return new SystemPromptCache(overviewFirstLine, skillSummaries);
+    return new SystemPromptCache(overviewText, overviewFirstLine, skillSummaries);
+  }
+
+  getOverviewText(): string {
+    return this.overviewText;
   }
 
   /**
@@ -79,16 +97,19 @@ export class SystemPromptCache {
 
 // ─── 工具函数 ──────────────────────────────────────────────────────────────────
 
-async function readFirstLine(filePath: string): Promise<string> {
+async function readDoc(filePath: string, strict: boolean): Promise<string> {
   try {
-    const content = await readFile(filePath, 'utf-8');
-    // 跳过 markdown 标题行（# 开头），取第一个非空非标题行
-    for (const line of content.split('\n')) {
-      const trimmed = line.trim();
-      if (trimmed && !trimmed.startsWith('#')) return trimmed;
-    }
-    return '';
+    return await readFile(filePath, 'utf-8');
   } catch {
+    if (strict) throw new Error(`Required bot-memory doc missing: ${filePath}`);
     return '';
   }
+}
+
+function firstMeaningfulLine(content: string): string {
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed && !trimmed.startsWith('#')) return trimmed;
+  }
+  return '';
 }

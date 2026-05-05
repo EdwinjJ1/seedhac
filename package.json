@@ -12,6 +12,7 @@
     "build": "pnpm -r build",
     "clean": "pnpm -r exec rm -rf dist .tsbuildinfo tsconfig.tsbuildinfo",
     "dev": "pnpm --filter @seedhac/bot dev",
+    "smoke:harness": "pnpm --filter @seedhac/bot smoke:harness",
     "lint": "eslint \"packages/*/src/**/*.ts\"",
     "lint:fix": "eslint \"packages/*/src/**/*.ts\" --fix",
     "format": "prettier --write \"packages/*/src/**/*.{ts,json,md}\"",

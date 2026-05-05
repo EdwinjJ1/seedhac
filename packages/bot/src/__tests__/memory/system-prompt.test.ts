@@ -39,6 +39,13 @@ describe('SystemPromptCache.load', () => {
     mockReadFile.mockRejectedValue(new Error('ENOENT'));
     await expect(SystemPromptCache.load('/nonexistent')).resolves.toBeDefined();
   });
+
+  it('strict mode fails fast when required files are missing', async () => {
+    mockReadFile.mockRejectedValue(new Error('ENOENT'));
+    await expect(SystemPromptCache.load('/nonexistent', { strict: true })).rejects.toThrow(
+      'Required bot-memory doc missing',
+    );
+  });
 });
 
 // ─── build ───────────────────────────────────────────────────────────────────

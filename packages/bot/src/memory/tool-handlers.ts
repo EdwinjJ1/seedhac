@@ -11,9 +11,9 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
-import type { LLMTool, ToolCall, ToolResult } from '@seedhac/contracts';
+import type { LLMTool, Skill, ToolCall, ToolResult } from '@seedhac/contracts';
 import type { MemoryKind } from '@seedhac/contracts';
-import { skills } from '@seedhac/skills';
+import { skills as defaultSkills } from '@seedhac/skills';
 
 import type { IMemoryStore } from './memory-store.js';
 import { truncateToBytes } from './text-utils.js';
@@ -83,6 +83,8 @@ export interface ToolLogger {
 
 export interface ExecutorDeps {
   readonly store: IMemoryStore;
+  /** 当前 runtime 实际启用的 Skill 集合；不传时使用默认全量注册表。 */
+  readonly skills?: readonly Skill[];
   /** 当前群组 ID，memory.read 的隐式上下文 */
   readonly chatId: string;
   readonly logger: ToolLogger;
@@ -135,7 +137,7 @@ async function dispatch(
     case 'memory.search':
       return handleMemorySearch(args, deps);
     case 'skill.list':
-      return handleSkillList();
+      return handleSkillList(deps.skills ?? defaultSkills);
     case 'skill.read':
       return handleSkillRead(args, deps.docsRoot, readFileFn);
     default:
@@ -175,8 +177,13 @@ async function handleMemorySearch(
   return JSON.stringify({ records: r.value });
 }
 
-function handleSkillList(): string {
-  const list = skills.map((s) => ({ name: s.name, description: s.trigger.description }));
+function handleSkillList(skills: readonly Skill[]): string {
+  const list = skills.map((s) => ({
+    name: s.name,
+    description: s.metadata.description,
+    when_to_use: s.metadata.when_to_use,
+    examples: s.metadata.examples,
+  }));
   return JSON.stringify({ skills: list });
 }
 
