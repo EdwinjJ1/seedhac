@@ -63,10 +63,7 @@ export const TRIGGER_RULES: readonly TriggerRule[] = [
   },
   {
     kind: '决策追溯',
-    patterns: [
-      /(当时|之前|上次).*(决定|定了|定的|定下)/,
-      /决定用\s*\S+\s*还是/,
-    ],
+    patterns: [/(当时|之前|上次).*(决定|定了|定的|定下)/, /决定用\s*\S+\s*还是/],
   },
 ];
 
@@ -85,6 +82,26 @@ function ruleMatch(messages: readonly Message[]): {
   return null;
 }
 
+const VAGUE_ANSWER_RE =
+  /(好像|大概|大约|约莫|可能|应该|记得|忘了|想不起来|不确定|也许|或许|几个|多少|哪个|哪些|是不是|啥|来着|找不到|在跑|还没|稍等)/;
+
+function isSubstantiveAnswer(text: string): boolean {
+  if (VAGUE_ANSWER_RE.test(text)) return false;
+
+  return (
+    /\d/.test(text) ||
+    /https?:\/\//.test(text) ||
+    /(叫|名叫|叫做)\s*[^\s,，。.?？!！]{2,12}/.test(text) ||
+    /(是|为|等于)\s*[^\s,，。.?？!！]{2,12}/.test(text) ||
+    /(决定|定了|选|采用|用)\s*[A-Za-z0-9\u4e00-\u9fff_.+#-]{2,20}/.test(text)
+  );
+}
+
+function hasSubstantiveAnswer(messages: readonly Message[]): boolean {
+  if (messages.length < 2) return false;
+  return messages.slice(1).some((m) => isSubstantiveAnswer(m.text));
+}
+
 /** 疑问无人答：第 1 条含 ? / ？ / "多少" / "怎么" / "哪" 等疑问词，且后续消息没出现实质性数据 */
 function detectUnansweredQuestion(messages: readonly Message[]): string | null {
   if (messages.length < 2) return null;
@@ -92,17 +109,10 @@ function detectUnansweredQuestion(messages: readonly Message[]): string | null {
   // 中文没有 \b 词边界，直接含义匹配
   // 不把"啥"算疑问词——避免"中午吃啥"误报
   const isQuestion =
-    /[?？]/.test(first.text) ||
-    /(多少|怎么|哪个|哪些|几个|是不是|何时|什么时候)/.test(first.text);
+    /[?？]/.test(first.text) || /(多少|怎么|哪个|哪些|几个|是不是|何时|什么时候)/.test(first.text);
   if (!isQuestion) return null;
 
-  const rest = messages.slice(1);
-  // 实质性答案的弱启发：含数字 / 百分号 / 等号"是 X"
-  // 注意：不把"在跑/还没/稍等"算作答案——这些表示还没结果
-  const answered = rest.some(
-    (m) => /\d/.test(m.text) || /(是|为|等于|约莫|大约)\s*\S{1,8}/.test(m.text),
-  );
-  if (answered) return null;
+  if (hasSubstantiveAnswer(messages)) return null;
   return first.text;
 }
 
@@ -128,6 +138,9 @@ export class GapDetector {
 
   async detect(messages: readonly Message[]): Promise<Result<GapDetection>> {
     if (messages.length === 0) return ok(NO_GAP);
+
+    // 当前对话已经出现明确答案时，不再主动召回历史记忆。
+    if (hasSubstantiveAnswer(messages)) return ok(NO_GAP);
 
     // ── Layer 1: 关键词规则 ─────────────────────────────────────
     const hit = ruleMatch(messages);
@@ -179,6 +192,12 @@ export class GapDetector {
  * 优先抓"那个 X"/"上次 X"后面的名词块，否则取整句前 20 字。
  */
 function extractQuery(text: string): string {
+  const decision =
+    /(?:当时|之前|上次)?.*?(?:决定|定了|定的|定下|决定用)\s*([^\s,，。.?？!！]{1,20}\s*还是\s*[^\s,，。.?？!！]{1,20})/.exec(
+      text,
+    );
+  if (decision && decision[1]) return `决定用 ${decision[1].trim()}`;
+
   const namedRefs = [
     /那个\s*([^\s,，。.?？!！]{1,12})/,
     /上次\s*([^\s,，。.?？!！]{1,12})/,

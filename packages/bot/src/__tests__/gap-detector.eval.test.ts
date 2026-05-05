@@ -18,9 +18,7 @@ import { createLLMClient } from '../llm-client.js';
 import type { Message } from '@seedhac/contracts';
 
 const HAS_ARK = Boolean(
-  process.env['ARK_API_KEY'] &&
-    process.env['ARK_MODEL_LITE'] &&
-    process.env['ARK_MODEL_PRO'],
+  process.env['ARK_API_KEY'] && process.env['ARK_MODEL_LITE'] && process.env['ARK_MODEL_PRO'],
 );
 
 interface Sample {
@@ -83,9 +81,7 @@ const SAMPLES: readonly Sample[] = [
   {
     label: 'positive',
     tag: '不确定性-数据',
-    messages: [
-      { sender: 'A', text: 'Q3 同期增长是多少来着' },
-    ],
+    messages: [{ sender: 'A', text: 'Q3 同期增长是多少来着' }],
   },
   {
     label: 'positive',
@@ -98,16 +94,12 @@ const SAMPLES: readonly Sample[] = [
   {
     label: 'positive',
     tag: '历史关联-竞品',
-    messages: [
-      { sender: 'A', text: '同类竞品的转化率好像是 12 还是 15' },
-    ],
+    messages: [{ sender: 'A', text: '同类竞品的转化率好像是 12 还是 15' }],
   },
   {
     label: 'positive',
     tag: '不确定性-合同条款',
-    messages: [
-      { sender: 'A', text: '合同里那个赔偿条款是按月还是按天来着' },
-    ],
+    messages: [{ sender: 'A', text: '合同里那个赔偿条款是按月还是按天来着' }],
   },
 
   // ─── 负样本：不应触发 ────────────────────────────────────
@@ -164,9 +156,7 @@ const SAMPLES: readonly Sample[] = [
   {
     label: 'negative',
     tag: '正在工作汇报',
-    messages: [
-      { sender: 'A', text: '我刚把登录页改完了，提了 PR' },
-    ],
+    messages: [{ sender: 'A', text: '我刚把登录页改完了，提了 PR' }],
   },
   {
     label: 'negative',
@@ -183,11 +173,13 @@ const SAMPLES: readonly Sample[] = [
   },
 ];
 
-let counter = 0;
-function toMessage(s: { sender: string; text: string }): Message {
-  counter += 1;
+function toMessage(
+  s: { sender: string; text: string },
+  sampleIndex: number,
+  messageIndex: number,
+): Message {
   return {
-    messageId: `eval_${counter}`,
+    messageId: `eval_${sampleIndex}_${messageIndex}`,
     chatId: 'eval_chat',
     chatType: 'group',
     sender: { userId: `u_${s.sender}`, name: s.sender },
@@ -195,7 +187,7 @@ function toMessage(s: { sender: string; text: string }): Message {
     text: s.text,
     rawContent: s.text,
     mentions: [],
-    timestamp: 1_700_000_000_000 + counter,
+    timestamp: 1_700_000_000_000 + sampleIndex * 100 + messageIndex,
   };
 }
 
@@ -204,19 +196,27 @@ describe.skipIf(!HAS_ARK)('GapDetector evaluation (live豆包 Lite)', () => {
     const llm = createLLMClient();
     const detector = new GapDetector(llm);
 
-    // 并发跑 20 条，节省总时长（豆包 Lite 单次 5-12s 串行会超时）
-    const results = await Promise.all(
-      SAMPLES.map(async (sample) => {
-        const messages = sample.messages.map(toMessage);
-        const r = await detector.detect(messages);
-        const got = r.ok && r.value.shouldRecall;
-        return {
-          tag: sample.tag,
-          expected: sample.label === 'positive',
-          got,
-        };
-      }),
-    );
+    const results: Array<{ tag: string; expected: boolean; got: boolean }> = [];
+    const concurrency = 3;
+    for (let i = 0; i < SAMPLES.length; i += concurrency) {
+      const batch = SAMPLES.slice(i, i + concurrency);
+      const batchResults = await Promise.all(
+        batch.map(async (sample, offset) => {
+          const sampleIndex = i + offset;
+          const messages = sample.messages.map((m, messageIndex) =>
+            toMessage(m, sampleIndex, messageIndex),
+          );
+          const r = await detector.detect(messages);
+          const got = r.ok && r.value.shouldRecall;
+          return {
+            tag: sample.tag,
+            expected: sample.label === 'positive',
+            got,
+          };
+        }),
+      );
+      results.push(...batchResults);
+    }
 
     const tp = results.filter((r) => r.expected && r.got).length;
     const fn = results.filter((r) => r.expected && !r.got).length;

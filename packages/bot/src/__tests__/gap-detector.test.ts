@@ -2,11 +2,9 @@ import { describe, it, expect, vi } from 'vitest';
 import { GapDetector } from '../gap-detector.js';
 import type { Message, LLMClient } from '@seedhac/contracts';
 
-let counter = 0;
 function makeMsg(text: string, name = 'Alice'): Message {
-  counter += 1;
   return {
-    messageId: `msg_${counter}`,
+    messageId: `msg_${name}_${text}`,
     chatId: 'chat_a',
     chatType: 'group',
     sender: { userId: `u_${name}`, name },
@@ -14,7 +12,7 @@ function makeMsg(text: string, name = 'Alice'): Message {
     text,
     rawContent: text,
     mentions: [],
-    timestamp: 1_700_000_000_000 + counter,
+    timestamp: 1_700_000_000_000,
   };
 }
 
@@ -63,9 +61,7 @@ describe('GapDetector', () => {
       const ask = vi.fn();
       const detector = new GapDetector(makeLLM(ask));
 
-      const result = await detector.detect([
-        makeMsg('上次会议是不是定了发布日期'),
-      ]);
+      const result = await detector.detect([makeMsg('上次会议是不是定了发布日期')]);
       expect(result.ok).toBe(true);
       if (result.ok) {
         expect(result.value.source).toBe('rule');
@@ -104,12 +100,27 @@ describe('GapDetector', () => {
       const ask = vi.fn();
       const detector = new GapDetector(makeLLM(ask));
 
-      const result = await detector.detect([
-        makeMsg('当时我们决定用 PostgreSQL 还是 MySQL 来着'),
-      ]);
+      const result = await detector.detect([makeMsg('当时我们决定用 PostgreSQL 还是 MySQL 来着')]);
       expect(result.ok).toBe(true);
       if (result.ok) {
         expect(result.value.source).toBe('rule');
+        expect(result.value.query).toBe('决定用 PostgreSQL 还是 MySQL');
+      }
+      expect(ask).not.toHaveBeenCalled();
+    });
+
+    it('does NOT trigger rule recall when current chat already answered it', async () => {
+      const ask = vi.fn();
+      const detector = new GapDetector(makeLLM(ask));
+
+      const result = await detector.detect([
+        makeMsg('上次那个客户叫啥'),
+        makeMsg('叫张总，开过两次会', 'Bob'),
+      ]);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.shouldRecall).toBe(false);
+        expect(result.value.source).toBe('none');
       }
       expect(ask).not.toHaveBeenCalled();
     });
@@ -142,16 +153,12 @@ describe('GapDetector', () => {
       });
       const detector = new GapDetector(makeLLM(ask));
 
-      const result = await detector.detect([
-        makeMsg('Q3 转化率多少'),
-        makeMsg('7.2%，刚拉的报表'),
-      ]);
+      const result = await detector.detect([makeMsg('Q3 转化率多少'), makeMsg('7.2%，刚拉的报表')]);
       expect(result.ok).toBe(true);
       if (result.ok) {
         expect(result.value.shouldRecall).toBe(false);
       }
-      // 规则不命中（有数字答案），降级到 LLM
-      expect(ask).toHaveBeenCalled();
+      expect(ask).not.toHaveBeenCalled();
     });
   });
 
@@ -165,9 +172,7 @@ describe('GapDetector', () => {
       const detector = new GapDetector(makeLLM(ask));
 
       // 没有"那个/上次/我记得/来着/决定"这些关键词
-      const result = await detector.detect([
-        makeMsg('竞品的转化情况怎么样比对一下'),
-      ]);
+      const result = await detector.detect([makeMsg('竞品的转化情况怎么样比对一下')]);
       expect(result.ok).toBe(true);
       if (result.ok) {
         expect(result.value.shouldRecall).toBe(true);
@@ -180,14 +185,11 @@ describe('GapDetector', () => {
     it('strips markdown fence on LLM output', async () => {
       const ask = vi.fn().mockResolvedValueOnce({
         ok: true,
-        value:
-          '```json\n{"shouldRecall":true,"reason":"X","query":"竞品对比"}\n```',
+        value: '```json\n{"shouldRecall":true,"reason":"X","query":"竞品对比"}\n```',
       });
       const detector = new GapDetector(makeLLM(ask));
 
-      const result = await detector.detect([
-        makeMsg('竞品的转化情况怎么样比对一下'),
-      ]);
+      const result = await detector.detect([makeMsg('竞品的转化情况怎么样比对一下')]);
       expect(result.ok).toBe(true);
       if (result.ok) {
         expect(result.value.query).toBe('竞品对比');
@@ -198,14 +200,11 @@ describe('GapDetector', () => {
     it('extracts JSON when LLM adds prefix/suffix prose', async () => {
       const ask = vi.fn().mockResolvedValueOnce({
         ok: true,
-        value:
-          '好的，分析如下：{"shouldRecall":true,"reason":"模糊","query":"调研"} 希望帮到你',
+        value: '好的，分析如下：{"shouldRecall":true,"reason":"模糊","query":"调研"} 希望帮到你',
       });
       const detector = new GapDetector(makeLLM(ask));
 
-      const result = await detector.detect([
-        makeMsg('竞品的转化情况怎么样比对一下'),
-      ]);
+      const result = await detector.detect([makeMsg('竞品的转化情况怎么样比对一下')]);
       expect(result.ok).toBe(true);
       if (result.ok) expect(result.value.query).toBe('调研');
     });
@@ -217,9 +216,7 @@ describe('GapDetector', () => {
       });
       const detector = new GapDetector(makeLLM(ask));
 
-      const result = await detector.detect([
-        makeMsg('竞品的转化情况怎么样比对一下'),
-      ]);
+      const result = await detector.detect([makeMsg('竞品的转化情况怎么样比对一下')]);
       expect(result.ok).toBe(true);
       if (result.ok) {
         expect(result.value.shouldRecall).toBe(false);
@@ -234,9 +231,7 @@ describe('GapDetector', () => {
       });
       const detector = new GapDetector(makeLLM(ask));
 
-      const result = await detector.detect([
-        makeMsg('竞品的转化情况怎么样比对一下'),
-      ]);
+      const result = await detector.detect([makeMsg('竞品的转化情况怎么样比对一下')]);
       expect(result.ok).toBe(true);
       if (result.ok) expect(result.value.shouldRecall).toBe(false);
     });
@@ -248,9 +243,7 @@ describe('GapDetector', () => {
       });
       const detector = new GapDetector(makeLLM(ask));
 
-      const result = await detector.detect([
-        makeMsg('竞品的转化情况怎么样比对一下'),
-      ]);
+      const result = await detector.detect([makeMsg('竞品的转化情况怎么样比对一下')]);
       expect(result.ok).toBe(true);
       if (result.ok) expect(result.value.shouldRecall).toBe(false);
     });
@@ -262,10 +255,7 @@ describe('GapDetector', () => {
       });
       const detector = new GapDetector(makeLLM(ask));
 
-      await detector.detect([
-        makeMsg('竞品对比情况', 'PM1'),
-        makeMsg('行', 'PM2'),
-      ]);
+      await detector.detect([makeMsg('竞品对比情况', 'PM1'), makeMsg('行', 'PM2')]);
 
       expect(ask).toHaveBeenCalledOnce();
       const [prompt, opts] = ask.mock.calls[0]!;
